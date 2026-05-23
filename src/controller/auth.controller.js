@@ -4,7 +4,9 @@ import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import jwt from "jsonwebtoken";
-
+import { randomUUID } from "crypto";
+import cookie from "cookie";
+import { emailQueue } from "../queues/emailQueue.js";
 
 /**
  * - User Register Controller
@@ -25,7 +27,13 @@ export const register = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Email already in use");
     }
     const newUser = await new User({ name, email, password });
-    await newUser.save();
+    newUser.save();;
+
+
+    await emailQueue.add("welcome", { email: newUser.email }, {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 }
+    });
 
     return new ApiResponse(201, "User registered successfully", {
         user: {
@@ -51,8 +59,8 @@ export const login = asyncHandler(async (req, res) => {
     }
 
     const user = await User.findOne({ email }).select("+password");
-    if (!user) {
-        throw new ApiError(404, "User not found");
+    if (!user || !(await user.comparePassword(password))) {
+        throw new ApiError(401, "Invalid credentials");
     }
 
     const isPasswordValid = await user.comparePassword(password);
@@ -66,12 +74,18 @@ export const login = asyncHandler(async (req, res) => {
         userId: user._id,
         token: refreshToken,
         family: randomUUID(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        expiresAt: new Date(Date.now() + Number(process.env.REFRESH_TOKEN_EXPIRY))
     });
 
-    return new ApiResponse(200, "User logged in successfully", {
+    res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict",
+        expires: new Date(Date.now() + Number(process.env.REFRESH_TOKEN_EXPIRY))
+    });
+
+    return new ApiResponse(201, "User logged in successfully", {
         accessToken,
-        refreshToken,
         user: {
             name: user.name,
             email: user.email,
@@ -84,17 +98,19 @@ export const login = asyncHandler(async (req, res) => {
 /**
  * - Refresh Token Controller
  * - POST /api/auth/refresh-token
- * - Body: { refreshToken }
+ * - Cookies: { refreshToken }
  */
 
 export const refreshToken = asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
+
+    const cookies = cookie.parse(req.headers.cookie || "");
+
+    const refreshToken = cookies.refreshToken;;
     if (!refreshToken) {
         throw new ApiError(400, "Refresh token is required");
     }
     let storedToken = await RefreshToken.findOne({
         token: refreshToken,
-
     });
 
     if (!storedToken) {
@@ -102,7 +118,6 @@ export const refreshToken = asyncHandler(async (req, res) => {
     }
 
     if (storedToken.isRevoked) {
-        // Invalidate the ENTIRE family — all devices, all sessions
         await RefreshToken.updateMany(
             { family: storedToken.family },
             { isRevoked: true }
@@ -141,39 +156,47 @@ export const refreshToken = asyncHandler(async (req, res) => {
     const user = await User.findById(
         decoded.id
     );
-    if (!user) {
-        throw new ApiError(
-            404,
-            "User not found"
-        );
+    if (!user || !(await user.comparePassword(password))) {
+        throw new ApiError(401, "Invalid credentials");
     }
     const newAccessToken = user.generateAccessToken();
     const newRefreshToken = user.generateRefreshToken();
     await RefreshToken.create({
-
         userId: user._id,
-
         token: newRefreshToken,
         family: storedToken.family,
         expiresAt: new Date(
             Date.now() +
-            7 * 24 * 60 * 60 * 1000
+            Number(process.env.REFRESH_TOKEN_EXPIRY)
         )
     });
-    await user.save();
+    user.save();
+
+    res.cookie("refreshToken", newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict",
+        expires: new Date(Date.now() + Number(process.env.REFRESH_TOKEN_EXPIRY))
+    });
 
     return new ApiResponse(200, "Token refreshed successfully", {
         accessToken: newAccessToken,
-        refreshToken: newRefreshToken
     }).send(res);
 
 })
 
 export const logout = asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
+    const cookies = cookie.parse(req.headers.cookie || "");
+    const { refreshToken } = cookies;
     await RefreshToken.findOneAndUpdate(
         { token: refreshToken },
         { isRevoked: true }
     );
+
+    res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict"
+    });
     return new ApiResponse(200, "Logged out successfully").send(res);
 });

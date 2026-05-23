@@ -17,17 +17,34 @@ const userSchema = new mongoose.Schema({
         lowercase: true,
         match: [/\S+@\S+\.\S+/, "Please use a valid email address"]
     },
+    phone: {
+        type: String,
+        required: true,
+        unique: true,
+    },
+    isVerified: {
+        type: Boolean,
+        default: false,
+    },
+
+    kycStatus: {
+        type: String,
+        enum: ["PENDING", "VERIFIED", "REJECTED"],
+        default: "PENDING",
+    },
+
+    role: {
+        type: String,
+        enum: ["USER", "ADMIN"],
+        default: "USER",
+    },
     password: {
         type: String,
         required: [true, "Password is required"],
         minlength: [6, "Password must be at least 6 characters long"],
         trim: true,
         select: false
-    },
-    balance: {
-        type: Number,
-        default: 0
-    },
+    }
 }, {
     timestamps: true,
 });
