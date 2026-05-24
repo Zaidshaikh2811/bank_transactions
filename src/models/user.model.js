@@ -9,6 +9,9 @@ const userSchema = new mongoose.Schema({
         required: [true, "Name is required"],
         trim: true
     },
+    ip: {
+        type: String,
+    },
     email: {
         type: String,
         required: [true, "Email is required"],
@@ -19,20 +22,28 @@ const userSchema = new mongoose.Schema({
     },
     phone: {
         type: String,
-        required: true,
-        unique: true,
+        required: [true, "Phone number is required"],
+        unique: [true, "Phone number must be unique"],
     },
     isVerified: {
         type: Boolean,
         default: false,
     },
-
+    isActive: {
+        type: Boolean,
+        default: true,
+    },
     kycStatus: {
         type: String,
         enum: ["PENDING", "VERIFIED", "REJECTED"],
         default: "PENDING",
     },
-
+    deactivatedAt: {
+        type: Date,
+    },
+    deactivatedReason: {
+        type: String,
+    },
     role: {
         type: String,
         enum: ["USER", "ADMIN"],
@@ -69,7 +80,9 @@ userSchema.methods.generateAccessToken = function () {
     const payload = {
         id: this._id,
         email: this.email,
-        name: this.name
+        name: this.name,
+        role: this.role,
+        ip: this.ip
     };
     return jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
         expiresIn: process.env.ACCESS_TOKEN_EXPIRY || "15m"

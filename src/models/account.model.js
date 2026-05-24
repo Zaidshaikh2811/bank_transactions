@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 
+export const VALID_ACCOUNT_TYPES = ["savings", "current", "fixed"];
 
 const bankAccountSchema = new mongoose.Schema({
     userId: {
@@ -20,12 +21,13 @@ const bankAccountSchema = new mongoose.Schema({
         type: String,
         unique: true,
         required: true,
+        immutable: true
     },
 
     accountType: {
         type: String,
-        enum: ["SAVINGS", "CURRENT"],
-        default: "SAVINGS",
+        enum: { values: VALID_ACCOUNT_TYPES, message: "Account type must be either savings, current, or fixed" },
+        default: "savings",
     },
     currency: {
         type: String,
@@ -44,11 +46,19 @@ const bankAccountSchema = new mongoose.Schema({
         default: 0,
         min: 0,
     },
+    idempotencyKey: {
+        type: String,
+        unique: true,
+    }
 }, {
     timestamps: true
 });
 
 bankAccountSchema.index({ userId: 1, currency: 1 });
 
+
 const BankAccount = mongoose.model("BankAccount", bankAccountSchema);
+
+
+
 export default BankAccount; 

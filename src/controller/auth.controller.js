@@ -16,18 +16,16 @@ import { emailQueue } from "../queues/emailQueue.js";
 
 export const register = asyncHandler(async (req, res) => {
 
-    const { name, email, password } = req.body;
-    if (!name || !email || !password) {
-        throw new ApiError(400, "Name, email and password are required");
+    const { name, email, password, phone } = req.body;
+    if (!name || !email || !password || !phone) {
+        throw new ApiError(400, "Name, email, password and phone are required");
     }
     const existingUser = await User.findOne({ email });
-    console.log(existingUser);
 
     if (existingUser) {
         throw new ApiError(400, "Email already in use");
     }
-    const newUser = await new User({ name, email, password });
-    newUser.save();;
+    const newUser = await User.create({ name, email, password, phone });
 
 
     await emailQueue.add("welcome", { email: newUser.email }, {
@@ -40,6 +38,7 @@ export const register = asyncHandler(async (req, res) => {
             id: newUser._id,
             name: newUser.name,
             email: newUser.email,
+            phone: newUser.phone,
             balance: newUser.balance
         }
     }).send(res);
@@ -199,4 +198,117 @@ export const logout = asyncHandler(async (req, res) => {
         sameSite: "Strict"
     });
     return new ApiResponse(200, "Logged out successfully").send(res);
+});
+
+
+/**
+ * - Activate User Controller
+ * - POST /api/auth/activate-user
+ * - Body: { email }
+ */
+
+
+export const reactivateUser = asyncHandler(async (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+        throw new ApiError(400, "Email is required");
+    }
+    const user = await User.findOne({ email });
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+
+    if (user.isVerified) {
+        throw new ApiError(400, "User is already verified");
+    }
+    user.isVerified = true;
+    user.isActive = true;
+    user.deactivatedAt = null;
+    user.deactivatedReason = null;
+    await user.save();
+
+    await emailQueue.add("account-reactivated", {
+        email: user.email
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+    return new ApiResponse(200, "User activated successfully").send(res);
+});
+
+
+
+/**
+ * 
+ * - Deactivate User Controller
+ * - PATCH /api/auth/users/:userId/deactivate
+ * - Headers: { Authorization: "Bearer <accessToken>" }
+ * - Only accessible by admin users
+ * - Sets isActive to false, preventing the user from logging in or performing any actions until reactivated
+ */
+export const deactivateUser = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const { reason } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+    if (!user.isActive) {
+        throw new ApiError(400, "User is already deactivated");
+    }
+
+    if (user.role === "admin") {
+        throw new ApiError(403, "Cannot deactivate an admin account");
+    }
+    user.isActive = false;
+    user.deactivatedAt = new Date();
+    user.deactivatedReason = reason.trim() || "No reason provided";
+    await user.save();
+    await emailQueue.add("account-deactivated", {
+        email: user.email, reason
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+    return new ApiResponse(200, "User deactivated successfully").send(res);
+});
+
+
+
+export const activateUser = asyncHandler(async (req, res) => {
+    const { token } = req.params;
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+    const userId = decoded.id;
+    const user = await User.findOne({ _id: userId });
+    if (!user) {
+        throw new ApiError(404, "Invalid activation token");
+    }
+    if (user.isVerified) {
+        throw new ApiError(400, "User is already verified");
+    }
+
+    user.isVerified = true;
+    await user.save();
+
+    await emailQueue.add("account-activated", {
+        email: user.email
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+
+    return new ApiResponse(200, "User activated successfully").send(res);
+});
+
+
+
+export const deactivateOwnAccount = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user.id);
+    if (!user) throw new ApiError(404, "User not found");
+
+    user.isActive = false;
+    user.deactivatedAt = new Date();
+    user.deactivatedReason = "Self deactivated";
+    await user.save();
+
+
+    await emailQueue.add("account-deactivated", {
+        email: user.email, reason: "Self deactivated"
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+
+    // await invalidateUserTokens(req.user.id);
+
+    return new ApiResponse(200, "Account deactivated successfully").send(res);
 });
