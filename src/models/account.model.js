@@ -9,7 +9,7 @@ const bankAccountSchema = new mongoose.Schema({
         required: [true, "User ID is required"],
         index: true
     },
-    status: {
+    isActive: {
         type: String,
         enum: {
             values: ["active", "suspended", "closed"],

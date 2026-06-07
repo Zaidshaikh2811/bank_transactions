@@ -32,6 +32,13 @@ new Worker("emails", async (job) => {
             break;
         case "account-activated":
             await sendAccountActivatedEmail(job.data.email);
+            break;
+        case "transaction-notification":
+            await sendTransactionNotificationEmail(job.data.email, job.data.transactionDetails);
+            break;
+        case "deposit":
+            await sendDepositEmail(job.data.email, job.data.amount, job.data.balance);
+            break;
         default:
             console.warn(`Unknown job type: ${job.name}`);
     }

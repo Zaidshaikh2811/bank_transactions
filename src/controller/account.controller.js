@@ -29,9 +29,9 @@ export const createAccount = asyncHandler(async (req, res) => {
     }
     const duplicate = await accountModel.findOne({ idempotencyKey });
     if (duplicate) {
-        return new ApiResponse(200, "Account already exists", {
+        throw new ApiError(400, "Account already exists", {
             account: duplicate
-        }).send(res);
+        });
     }
 
     const newAccount = await withTransaction(async (session) => {

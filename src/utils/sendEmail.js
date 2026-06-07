@@ -159,3 +159,27 @@ export const sendAccountActivatedEmail = async (email) => {
     });
 }
 
+
+
+/**
+ * 
+ * @param {*} email 
+ * @param {*} amount 
+ * @param {*} balance 
+ * @returns 
+ */
+
+
+export const sendDepositEmail = async (email, amount, balance) => {
+    return await sendEmail({
+        to: email,
+        subject: "Deposit Successful",
+        text: `Your deposit of ${amount} was successful. Your new balance is ${balance}.`,
+        html: `
+        <h1>Deposit Successful</h1>
+        <p>
+            Your deposit of ${amount} was successful. Your new balance is ${balance}.
+        </p>
+    `
+    });
+}

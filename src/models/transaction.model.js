@@ -1,34 +1,44 @@
+export const TRANSACTION_TYPES = {
+    TRANSFER: "TRANSFER",
+    DEPOSIT: "DEPOSIT",
+    WITHDRAW: "WITHDRAW",
+    BILL_PAYMENT: "BILL_PAYMENT",
+    REFUND: "REFUND"
+};
+
+export const TRANSACTION_STATUSES = {
+    PENDING: "PENDING",
+    SUCCESS: "SUCCESS",
+    FAILED: "FAILED",
+    REVERSED: "REVERSED"
+};
+
+import mongoose from "mongoose";
+
 const transactionSchema = new mongoose.Schema(
     {
         transactionId: {
             type: String,
             unique: true,
             required: true,
+            default: () => `txn_${new mongoose.Types.ObjectId()}`,
         },
 
         senderAccount: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "BankAccount",
-            required: [true, "Sender account is required"],
             index: true,
         },
 
         receiverAccount: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "BankAccount",
-            required: [true, "Receiver account is required"],
             index: true,
         },
 
         type: {
             type: String,
-            enum: [
-                "TRANSFER",
-                "DEPOSIT",
-                "WITHDRAW",
-                "BILL_PAYMENT",
-                "REFUND",
-            ],
+            enum: Object.values(TRANSACTION_TYPES),
             required: [true, "Transaction type is required"],
         },
 
@@ -45,8 +55,8 @@ const transactionSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: { values: ["PENDING", "SUCCESS", "FAILED", "REVERSED"], message: "Status must be either PENDING, SUCCESS, FAILED, or REVERSED" },
-            default: "PENDING",
+            enum: { values: Object.values(TRANSACTION_STATUSES), message: "Status must be either PENDING, SUCCESS, FAILED, or REVERSED" },
+            default: TRANSACTION_STATUSES.PENDING,
         },
 
         description: {
@@ -64,10 +74,21 @@ const transactionSchema = new mongoose.Schema(
             type: String,
             required: true,
         },
-
+        balanceAfter: { type: Number },  // snapshot of balance after transaction
+        metadata: {
+            ip: { type: String },
+            userAgent: { type: String },
+        },
         processedAt: Date,
     },
     { timestamps: true }
 );
+
+
+
+transactionSchema.index({ fromAccount: 1, createdAt: -1 });
+transactionSchema.index({ toAccount: 1, createdAt: -1 });
+transactionSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
+
 
 export default mongoose.model("Transaction", transactionSchema);

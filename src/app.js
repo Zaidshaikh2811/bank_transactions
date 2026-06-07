@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import authRoutes from "./routes/auth.route.js";
 import userRoutes from "./routes/accounts.route.js";
+import transactionRoutes from "./routes/transaction.route.js";
 import errorHandler from "./middleware/error.middleware.js";
 import cookies from "cookie-parser";
 import { authLimiter } from "./middleware/rateLimit.js";
@@ -20,8 +21,8 @@ app.use(cookies());
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
-app.use("/api/user", userRoutes);
-
+app.use("/api/account", userRoutes);
+app.use("/api/transaction", transactionRoutes);
 
 app.use(errorHandler);
 export default app;
