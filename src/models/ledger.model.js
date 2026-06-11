@@ -20,6 +20,8 @@ const ledgerSchema = new mongoose.Schema({
         type: String,
         enum: ["TRANSFER",
             "DEPOSIT",
+            "CREDIT",
+            "DEBIT",
             "WITHDRAW",
             "BILL_PAYMENT",
             "REFUND",],
@@ -32,6 +34,8 @@ const ledgerSchema = new mongoose.Schema({
         min: [0.01, "Amount must be at least 0.01"],
         immutable: true,
     },
+    balanceBefore: { type: Number, required: true },
+    balanceAfter: { type: Number, required: true },
     currency: {
         type: String,
         required: [true, "Currency is required"],
@@ -57,6 +61,7 @@ ledgerSchema.pre("updateOne", preventLedgerEntryModification);
 ledgerSchema.pre("findOneAndUpdate", preventLedgerEntryModification);
 ledgerSchema.pre("updateMany", preventLedgerEntryModification);
 ledgerSchema.pre("replaceOne", preventLedgerEntryModification);
+
 
 const LedgerEntry = mongoose.model("LedgerEntry", ledgerSchema);
 export default LedgerEntry;

@@ -83,7 +83,7 @@ export const login = asyncHandler(async (req, res) => {
         expires: new Date(Date.now() + Number(process.env.REFRESH_TOKEN_EXPIRY))
     });
 
-    return new ApiResponse(201, "User logged in successfully", {
+    return new ApiResponse(200, "User logged in successfully", {
         accessToken,
         user: {
             name: user.name,
