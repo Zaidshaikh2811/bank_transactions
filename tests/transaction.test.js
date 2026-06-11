@@ -30,7 +30,8 @@ describe("Transaction", () => {
                 password: "test123",
             });
 
-
+        console.log(login.status);
+        console.log(login.body);
         token = login.body.data.accessToken;
 
         const user = await User.findOne({ email: "test1@nuitx.com" });
