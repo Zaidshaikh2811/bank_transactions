@@ -1,0 +1,431 @@
+#  Banking Transaction Processing System
+
+A secure and scalable banking backend built with Node.js, Express, MongoDB, and Redis.
+
+This project simulates core banking operations including account management, deposits, withdrawals, fund transfers, ledger tracking, authentication, and transaction auditing while implementing production-grade backend engineering practices such as idempotency, rate limiting, token rotation, background jobs, database transactions, and CI/CD automation.
+
+---
+
+##  Features
+
+###  Authentication & Authorization
+
+- User Registration
+- User Login
+- JWT Access Tokens
+- Refresh Token Rotation
+- Secure HTTP-only Cookies
+- Logout Support
+- Role-Based Access Control (RBAC)
+- Admin Account Management
+
+---
+
+###  User Management
+
+- User Registration
+- Account Activation
+- Account Deactivation
+- Account Reactivation
+- Self Account Deactivation
+- Admin Controls
+
+---
+###  Bank Accounts
+
+- Create Savings Account
+- Create Current Account
+- Create Fixed Account
+- Maximum Account Limit Enforcement
+- One Savings Account Per User Rule
+- Unique Account Number Generation
+- Account Status Tracking
+
+---
+
+###  Transaction Processing
+
+- Deposit Funds
+- Withdraw Funds
+- Transfer Funds
+- Transaction History
+- Transaction Lookup
+- Balance Verification
+
+---
+
+###  Ledger System
+
+Every financial operation generates immutable ledger entries.
+
+Features:
+
+- Credit Entries
+- Debit Entries
+- Balance Before Tracking
+- Balance After Tracking
+- Transaction Linking
+- Audit Trail Support
+
+---
+
+###  Reliability Features
+
+#### Idempotency Keys
+
+Prevents duplicate financial operations.
+
+```http
+X-Idempotency-Key: unique-request-id
+```
+
+Supported in:
+
+- Account Creation
+- Deposits
+- Withdrawals
+- Transfers
+
+#### Database Transactions
+
+MongoDB transactions ensure:
+
+- Atomic Transfers
+- Consistent Account Balances
+- Reliable Ledger Creation
+
+---
+
+###  Background Jobs
+
+Implemented using:
+
+- BullMQ
+- Redis
+
+Email events:
+
+- Welcome Email
+- Account Creation Notification
+- Deposit Notification
+- Withdrawal Notification
+- Transfer Notification
+
+---
+
+### Security Features
+
+- JWT Authentication
+- Refresh Token Rotation
+- Token Reuse Detection
+- Rate Limiting
+- Helmet Security Headers
+- CORS Protection
+- Password Hashing (bcrypt)
+- Secure Cookies
+- Input Validation
+- Protected Routes
+
+---
+
+###  Scalability
+
+Node.js Cluster Mode enabled.
+
+Features:
+
+- Multi-core CPU utilization
+- Automatic Worker Respawn
+- Production-ready process management
+
+---
+
+###  Testing
+
+Implemented using:
+
+- Vitest
+- Supertest
+
+Coverage includes:
+
+- Authentication
+- Transactions
+- Business Logic
+- API Endpoints
+
+---
+
+###  CI/CD
+
+GitHub Actions pipeline automatically:
+
+- Installs dependencies
+- Starts MongoDB service
+- Starts Redis service
+- Runs test suite
+- Uploads coverage artifacts
+
+---
+
+##  Architecture
+```text
+Client
+   │
+   ▼
+Express API
+   │
+   ├── Authentication Layer
+   ├── Rate Limiting
+   ├── Authorization
+   │
+   ▼
+Controllers
+   │
+   ▼
+Services / Utilities
+   │
+   ▼
+MongoDB Transactions
+   │
+   ├── Users
+   ├── Accounts
+   ├── Transactions
+   ├── Ledger Entries
+   └── Refresh Tokens
+
+Background Jobs
+   │
+   ▼
+BullMQ + Redis
+   │
+   ▼
+Email Notifications
+```
+
+---
+
+##  Project Structure
+
+```text
+src
+│
+├── config
+│   ├── db.js
+│   ├── env.js
+│   └── mail.js
+│
+├── controller
+│   ├── auth.controller.js
+│   ├── account.controller.js
+│   └── transaction.controller.js
+│
+├── middleware
+│   ├── auth.middleware.js
+│   ├── admin.middleware.js
+│   ├── error.middleware.js
+│   └── rateLimit.js
+│
+├── models
+│   ├── user.model.js
+│   ├── account.model.js
+│   ├── transaction.model.js
+│   ├── ledger.model.js
+│   └── refreshToken.model.js
+│
+├── queues
+│   └── emailQueue.js
+│
+├── routes
+│   ├── auth.route.js
+│   ├── accounts.route.js
+│   └── transaction.route.js
+│
+├── utils
+│   ├── withTransaction.js
+│   ├── ApiError.js
+│   ├── ApiResponse.js
+│   └── logger.js
+│
+└── app.js
+```
+
+---
+
+##  Tech Stack
+
+### Backend
+
+- Node.js
+- Express.js
+
+### Database
+
+- MongoDB
+- Mongoose
+
+### Queue Processing
+
+- BullMQ
+- Redis
+
+### Authentication
+
+- JWT
+- Refresh Tokens
+
+### Security
+
+- Helmet
+- CORS
+- bcrypt
+- Express Rate Limit
+
+### Testing
+
+- Vitest
+- Supertest
+
+### DevOps
+
+- GitHub Actions
+- Node Cluster
+
+---
+
+##  API Endpoints
+
+### Authentication
+
+| Method | Endpoint |
+|----------|-----------|
+| POST | /api/auth/register |
+| POST | /api/auth/login |
+| POST | /api/auth/refresh-token |
+| POST | /api/auth/logout |
+| PATCH | /api/auth/activate/:token |
+
+---
+
+### Accounts
+
+| Method | Endpoint |
+|----------|-----------|
+| POST | /api/accounts |
+
+---
+
+### Transactions
+
+| Method | Endpoint |
+|----------|-----------|
+| POST | /api/transactions/deposit/:accountId |
+| POST | /api/transactions/withdraw/:accountId |
+| POST | /api/transactions/transfer |
+| GET | /api/transactions/history/:accountId |
+| GET | /api/transactions/ledger/:accountId |
+| GET | /api/transactions/verify/:accountId |
+| GET | /api/transactions/:transactionId |
+
+---
+
+##  Environment Variables
+
+```env
+PORT=3000
+
+MONGO_URI=
+
+ACCESS_TOKEN_SECRET=
+REFRESH_TOKEN_SECRET=
+
+ACCESS_TOKEN_EXPIRY=15m
+REFRESH_TOKEN_EXPIRY=604800000
+
+MAIL_HOST=
+MAIL_PORT=
+MAIL_USER=
+MAIL_PASS=
+
+REDIS_HOST=
+REDIS_PORT=
+
+MAX_DEPOSIT_AMOUNT=1000000
+MAX_WITHDRAWAL_AMOUNT=500000
+MAX_TRANSFER_AMOUNT=200000
+DAILY_TRANSFER_LIMIT=500000
+```
+
+---
+
+## ▶ Getting Started
+
+### Clone Repository
+
+```bash
+git clone https://github.com/Zaidshaikh2811/bank_transactions.git
+```
+
+### Install Dependencies
+
+```bash
+npm install
+```
+
+### Configure Environment
+
+```bash
+cp .env.example .env
+```
+
+### Start Development Server
+
+```bash
+npm run dev
+```
+
+### Run Tests
+
+```bash
+npm test
+```
+
+---
+
+##  Key Backend Concepts Demonstrated
+
+- JWT Authentication
+- Refresh Token Rotation
+- Token Reuse Detection
+- MongoDB Transactions
+- Idempotent APIs
+- Queue-Based Email Processing
+- Ledger Accounting
+- Role-Based Access Control
+- Cluster Mode Scaling
+- Rate Limiting
+- CI/CD Automation
+- Production Error Handling
+
+---
+
+##  Author
+
+### Zaid Shaikh
+
+Software Engineer
+
+- Node.js
+- Express.js
+- MongoDB
+- PostgreSQL
+- React
+- Next.js
+- Distributed Systems
+- Backend Engineering
+
+GitHub: https://github.com/Zaidshaikh2811
+
+---
+
+⭐ If you found this project useful, consider giving it a star.
