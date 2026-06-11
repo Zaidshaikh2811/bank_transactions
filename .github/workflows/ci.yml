@@ -38,7 +38,7 @@ jobs:
       - name: Run tests
         env:
           NODE_ENV:          test
-          MONGO_URI:    mongodb://localhost:27017/banking_test
+          MONGO_URI:    ${{ secrets.MONGO_URI }}
           REDIS_HOST:        localhost
           REDIS_PORT:        6379
           ACCESS_TOKEN_SECRET:  ${{ secrets.ACCESS_TOKEN_SECRET }}
