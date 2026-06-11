@@ -4,7 +4,9 @@ import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import jwt from "jsonwebtoken";
-
+import { randomUUID } from "crypto";
+import cookie from "cookie";
+import { emailQueue } from "../queues/emailQueue.js";
 
 /**
  * - User Register Controller
@@ -14,24 +16,29 @@ import jwt from "jsonwebtoken";
 
 export const register = asyncHandler(async (req, res) => {
 
-    const { name, email, password } = req.body;
-    if (!name || !email || !password) {
-        throw new ApiError(400, "Name, email and password are required");
+    const { name, email, password, phone } = req.body;
+    if (!name || !email || !password || !phone) {
+        throw new ApiError(400, "Name, email, password and phone are required");
     }
     const existingUser = await User.findOne({ email });
-    console.log(existingUser);
 
     if (existingUser) {
         throw new ApiError(400, "Email already in use");
     }
-    const newUser = await new User({ name, email, password });
-    await newUser.save();
+    const newUser = await User.create({ name, email, password, phone });
+
+
+    await emailQueue.add("welcome", { email: newUser.email }, {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 }
+    });
 
     return new ApiResponse(201, "User registered successfully", {
         user: {
             id: newUser._id,
             name: newUser.name,
             email: newUser.email,
+            phone: newUser.phone,
             balance: newUser.balance
         }
     }).send(res);
@@ -51,8 +58,8 @@ export const login = asyncHandler(async (req, res) => {
     }
 
     const user = await User.findOne({ email }).select("+password");
-    if (!user) {
-        throw new ApiError(404, "User not found");
+    if (!user || !(await user.comparePassword(password))) {
+        throw new ApiError(401, "Invalid credentials");
     }
 
     const isPasswordValid = await user.comparePassword(password);
@@ -66,12 +73,18 @@ export const login = asyncHandler(async (req, res) => {
         userId: user._id,
         token: refreshToken,
         family: randomUUID(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        expiresAt: new Date(Date.now() + Number(process.env.REFRESH_TOKEN_EXPIRY))
+    });
+
+    res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict",
+        expires: new Date(Date.now() + Number(process.env.REFRESH_TOKEN_EXPIRY))
     });
 
     return new ApiResponse(200, "User logged in successfully", {
         accessToken,
-        refreshToken,
         user: {
             name: user.name,
             email: user.email,
@@ -84,17 +97,19 @@ export const login = asyncHandler(async (req, res) => {
 /**
  * - Refresh Token Controller
  * - POST /api/auth/refresh-token
- * - Body: { refreshToken }
+ * - Cookies: { refreshToken }
  */
 
 export const refreshToken = asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
+
+    const cookies = cookie.parse(req.headers.cookie || "");
+
+    const refreshToken = cookies.refreshToken;;
     if (!refreshToken) {
         throw new ApiError(400, "Refresh token is required");
     }
     let storedToken = await RefreshToken.findOne({
         token: refreshToken,
-
     });
 
     if (!storedToken) {
@@ -102,7 +117,6 @@ export const refreshToken = asyncHandler(async (req, res) => {
     }
 
     if (storedToken.isRevoked) {
-        // Invalidate the ENTIRE family — all devices, all sessions
         await RefreshToken.updateMany(
             { family: storedToken.family },
             { isRevoked: true }
@@ -141,39 +155,160 @@ export const refreshToken = asyncHandler(async (req, res) => {
     const user = await User.findById(
         decoded.id
     );
-    if (!user) {
-        throw new ApiError(
-            404,
-            "User not found"
-        );
+    if (!user || !(await user.comparePassword(password))) {
+        throw new ApiError(401, "Invalid credentials");
     }
     const newAccessToken = user.generateAccessToken();
     const newRefreshToken = user.generateRefreshToken();
     await RefreshToken.create({
-
         userId: user._id,
-
         token: newRefreshToken,
         family: storedToken.family,
         expiresAt: new Date(
             Date.now() +
-            7 * 24 * 60 * 60 * 1000
+            Number(process.env.REFRESH_TOKEN_EXPIRY)
         )
     });
-    await user.save();
+    user.save();
+
+    res.cookie("refreshToken", newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict",
+        expires: new Date(Date.now() + Number(process.env.REFRESH_TOKEN_EXPIRY))
+    });
 
     return new ApiResponse(200, "Token refreshed successfully", {
         accessToken: newAccessToken,
-        refreshToken: newRefreshToken
     }).send(res);
 
 })
 
 export const logout = asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
+    const cookies = cookie.parse(req.headers.cookie || "");
+    const { refreshToken } = cookies;
     await RefreshToken.findOneAndUpdate(
         { token: refreshToken },
         { isRevoked: true }
     );
+
+    res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict"
+    });
     return new ApiResponse(200, "Logged out successfully").send(res);
+});
+
+
+/**
+ * - Activate User Controller
+ * - POST /api/auth/activate-user
+ * - Body: { email }
+ */
+
+
+export const reactivateUser = asyncHandler(async (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+        throw new ApiError(400, "Email is required");
+    }
+    const user = await User.findOne({ email });
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+
+    if (user.isVerified) {
+        throw new ApiError(400, "User is already verified");
+    }
+    user.isVerified = true;
+    user.isActive = true;
+    user.deactivatedAt = null;
+    user.deactivatedReason = null;
+    await user.save();
+
+    await emailQueue.add("account-reactivated", {
+        email: user.email
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+    return new ApiResponse(200, "User activated successfully").send(res);
+});
+
+
+
+/**
+ * 
+ * - Deactivate User Controller
+ * - PATCH /api/auth/users/:userId/deactivate
+ * - Headers: { Authorization: "Bearer <accessToken>" }
+ * - Only accessible by admin users
+ * - Sets isActive to false, preventing the user from logging in or performing any actions until reactivated
+ */
+export const deactivateUser = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const { reason } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+    if (!user.isActive) {
+        throw new ApiError(400, "User is already deactivated");
+    }
+
+    if (user.role === "admin") {
+        throw new ApiError(403, "Cannot deactivate an admin account");
+    }
+    user.isActive = false;
+    user.deactivatedAt = new Date();
+    user.deactivatedReason = reason.trim() || "No reason provided";
+    await user.save();
+    await emailQueue.add("account-deactivated", {
+        email: user.email, reason
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+    return new ApiResponse(200, "User deactivated successfully").send(res);
+});
+
+
+
+export const activateUser = asyncHandler(async (req, res) => {
+    const { token } = req.params;
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+    const userId = decoded.id;
+    const user = await User.findOne({ _id: userId });
+    if (!user) {
+        throw new ApiError(404, "Invalid activation token");
+    }
+    if (user.isVerified) {
+        throw new ApiError(400, "User is already verified");
+    }
+
+    user.isVerified = true;
+    await user.save();
+
+    await emailQueue.add("account-activated", {
+        email: user.email
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+
+    return new ApiResponse(200, "User activated successfully").send(res);
+});
+
+
+
+export const deactivateOwnAccount = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user.id);
+    if (!user) throw new ApiError(404, "User not found");
+
+    user.isActive = false;
+    user.deactivatedAt = new Date();
+    user.deactivatedReason = "Self deactivated";
+    await user.save();
+
+
+    await emailQueue.add("account-deactivated", {
+        email: user.email, reason: "Self deactivated"
+    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+
+    // await invalidateUserTokens(req.user.id);
+
+    return new ApiResponse(200, "Account deactivated successfully").send(res);
 });

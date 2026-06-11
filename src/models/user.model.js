@@ -9,6 +9,9 @@ const userSchema = new mongoose.Schema({
         required: [true, "Name is required"],
         trim: true
     },
+    ip: {
+        type: String,
+    },
     email: {
         type: String,
         required: [true, "Email is required"],
@@ -17,17 +20,42 @@ const userSchema = new mongoose.Schema({
         lowercase: true,
         match: [/\S+@\S+\.\S+/, "Please use a valid email address"]
     },
+    phone: {
+        type: String,
+        required: [true, "Phone number is required"],
+        unique: [true, "Phone number must be unique"],
+    },
+    isVerified: {
+        type: Boolean,
+        default: false,
+    },
+    isActive: {
+        type: Boolean,
+        default: true,
+    },
+    kycStatus: {
+        type: String,
+        enum: ["PENDING", "VERIFIED", "REJECTED"],
+        default: "PENDING",
+    },
+    deactivatedAt: {
+        type: Date,
+    },
+    deactivatedReason: {
+        type: String,
+    },
+    role: {
+        type: String,
+        enum: ["USER", "ADMIN"],
+        default: "USER",
+    },
     password: {
         type: String,
         required: [true, "Password is required"],
         minlength: [6, "Password must be at least 6 characters long"],
         trim: true,
         select: false
-    },
-    balance: {
-        type: Number,
-        default: 0
-    },
+    }
 }, {
     timestamps: true,
 });
@@ -52,7 +80,9 @@ userSchema.methods.generateAccessToken = function () {
     const payload = {
         id: this._id,
         email: this.email,
-        name: this.name
+        name: this.name,
+        role: this.role,
+        ip: this.ip
     };
     return jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
         expiresIn: process.env.ACCESS_TOKEN_EXPIRY || "15m"
@@ -71,5 +101,5 @@ userSchema.methods.generateRefreshToken = function () {
 };
 
 
-const User = mongoose.model("User", userSchema);
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 export default User;

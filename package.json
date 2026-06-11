@@ -5,8 +5,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "npx nodemon server.js"
+    "start": "node server.js",
+    "dev": "npx nodemon server.js",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "lint": "eslint src/**/*.js"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -14,11 +23,25 @@
   "dependencies": {
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.77.1",
+    "cluster": "^0.7.7",
+    "compression": "^1.8.1",
+    "cookie": "^1.1.1",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
+    "crypto": "^1.0.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.6.2"
+    "mongoose": "^9.6.2",
+    "nodemailer": "^8.0.7",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.8"
   }
 }
