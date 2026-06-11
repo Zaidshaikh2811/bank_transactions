@@ -2,9 +2,9 @@ import request from "supertest";
 import { describe, beforeAll, afterAll, it, expect } from "vitest";
 
 import app from "../src/app.js";
-import User from "../src/models/User.model.js";
-import Account from "../src/models/Account.model.js";
-import Transaction from "../src/models/Transaction.model.js";
+import User from "../src/models/user.model.js";
+import Account from "../src/models/account.model.js";
+import Transaction from "../src/models//transaction.model.js";
 import LedgerEntry from "../src/models/ledger.model.js";
 import mongoose from "mongoose";
 import { connectDB } from "../src/config/db.js";
