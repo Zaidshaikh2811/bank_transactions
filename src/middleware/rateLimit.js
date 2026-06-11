@@ -25,7 +25,7 @@ export const authLimiter = rateLimit({
  */
 export const transferLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 30,
+    max: 50,
     keyGenerator,
     standardHeaders: true,
     legacyHeaders: false,
