@@ -36,6 +36,8 @@ jobs:
         run: npm ci
 
       - name: Run tests
+        run: |
+          echo "MONGO_URI=$MONGO_URI"
         env:
           NODE_ENV:          test
           MONGO_URI:    ${{ secrets.MONGO_URI }}
