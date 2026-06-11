@@ -5,8 +5,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node server.js",
     "dev": "npx nodemon server.js",
-    "test": "vitest run"
+    "test": "cross-env NODE_ENV=test jest --forceExit --detectOpenHandles",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.js"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -31,6 +40,8 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
+    "jest": "^30.4.2",
     "supertest": "^7.2.2",
     "vitest": "^4.1.8"
   }
