@@ -62,6 +62,8 @@ ledgerSchema.pre("findOneAndUpdate", preventLedgerEntryModification);
 ledgerSchema.pre("updateMany", preventLedgerEntryModification);
 ledgerSchema.pre("replaceOne", preventLedgerEntryModification);
 
+const LedgerEntry =
+    mongoose.models.LedgerEntry ||
+    mongoose.model("LedgerEntry", ledgerSchema);
 
-const LedgerEntry = mongoose.model("LedgerEntry", ledgerSchema);
-export default LedgerEntry;
+export default LedgerEntry; 

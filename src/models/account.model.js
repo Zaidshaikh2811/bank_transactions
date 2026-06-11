@@ -57,8 +57,8 @@ const bankAccountSchema = new mongoose.Schema({
 bankAccountSchema.index({ userId: 1, currency: 1 });
 
 
-const BankAccount = mongoose.model("BankAccount", bankAccountSchema);
+const BankAccount =
+    mongoose.models.BankAccount ||
+    mongoose.model("BankAccount", bankAccountSchema);
 
-
-
-export default BankAccount; 
+export default BankAccount;;

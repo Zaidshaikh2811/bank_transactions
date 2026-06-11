@@ -74,7 +74,7 @@ const transactionSchema = new mongoose.Schema(
             type: String,
             required: true,
         },
-        balanceAfter: { type: Number },  // snapshot of balance after transaction
+        balanceAfter: { type: Number },
         metadata: {
             ip: { type: String },
             userAgent: { type: String },
@@ -91,4 +91,8 @@ transactionSchema.index({ toAccount: 1, createdAt: -1 });
 transactionSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
 
 
-export default mongoose.model("Transaction", transactionSchema);
+const Transaction =
+    mongoose.models.Transaction ||
+    mongoose.model("Transaction", transactionSchema);
+
+export default Transaction;
