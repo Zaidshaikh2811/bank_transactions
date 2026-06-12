@@ -163,21 +163,17 @@ export const transfer = asyncHandler(async (req, res) => {
         );
     }
 
-    console.log("Starting transaction with session...");
 
     const transaction = await withTransaction(async (session) => {
-        console.log("Transaction session started");
-        const senderAccount = await Account.findById(senderAccountId).session(session);
-        const receiverAccount = await Account.findById(receiverAccountId).session(session);
+        const senderAccount = await Account.findOne({ userId: senderAccountId }).session(session);
+        const receiverAccount = await Account.findOne({ userId: receiverAccountId }).session(session);
 
-        console.log("Sender account:", senderAccount);
-        console.log("Receiver account:", receiverAccount);
 
 
         if (!senderAccount) throw new ApiError(404, "Sender account not found");
         if (!receiverAccount) throw new ApiError(404, "Receiver account not found");
         if (senderAccount.userId.toString() !== req.user.id) throw new ApiError(403, "You do not own the sender account");
-        console.log("Account ownership verified");
+
 
         if (senderAccount.isActive !== "active") throw new ApiError(403, "Sender account is inactive");
         if (receiverAccount.isActive !== "active") throw new ApiError(403, "Receiver account is inactive");
@@ -199,7 +195,6 @@ export const transfer = asyncHandler(async (req, res) => {
             senderAccount.save({ session }),
             receiverAccount.save({ session })
         ]);
-        console.log("Account balances updated");
         const txn = new Transaction({
             senderAccount: senderAccount._id,
             receiverAccount: receiverAccount._id,
@@ -217,7 +212,6 @@ export const transfer = asyncHandler(async (req, res) => {
             processedAt: new Date(),
         });
         await txn.save({ session });
-        console.log("Transaction record created:", txn);
         const ledgerEntries = [
             new LedgerEntry({
                 transactionId: txn._id,
@@ -242,7 +236,6 @@ export const transfer = asyncHandler(async (req, res) => {
         ];
         await LedgerEntry.insertMany(ledgerEntries, { session });
 
-        console.log("Transaction record created:", txn);
         return {
             transaction: txn,
             senderBalance: senderAccount.balance,
@@ -269,9 +262,7 @@ export const transfer = asyncHandler(async (req, res) => {
             type: "received",
         }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } }),
     ]);
-    console.log("Email jobs added to queue");
-
-    return new ApiResponse(201, "Transfer successful", { transaction }).send(res);
+    return new ApiResponse(201, "Transfer successful", transaction).send(res);
 
 })
 
@@ -331,7 +322,6 @@ export const withdraw = asyncHandler(async (req, res) => {
         });
 
         await ledger.save({ session });
-        console.log("Withdrawal transaction and ledger entry created");
 
         return transaction;
     });

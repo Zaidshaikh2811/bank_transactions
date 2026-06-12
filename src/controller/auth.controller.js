@@ -312,3 +312,14 @@ export const deactivateOwnAccount = asyncHandler(async (req, res) => {
 
     return new ApiResponse(200, "Account deactivated successfully").send(res);
 });
+
+
+export const activeSessions = asyncHandler(async (req, res) => {
+    const refreshTokens = await RefreshToken.find({ userId: req.user.id, isRevoked: false }).select("-__v -_id -userId");
+    return new ApiResponse(200, "Active sessions retrieved successfully", { sessions: refreshTokens }).send(res);
+});
+
+export const logoutAllSessions = asyncHandler(async (req, res) => {
+    await RefreshToken.updateMany({ userId: req.user.id }, { isRevoked: true });
+    return new ApiResponse(200, "Logged out of all sessions successfully").send(res);
+})

@@ -6,3 +6,9 @@ export const generateAccountNumber = () => {
         9999999999
     ).toString();
 };
+
+
+export const maskAccountNumber = (accountNumber) => {
+    const lastFourDigits = accountNumber.slice(-4);
+    return `**** **** **** ${lastFourDigits}`;
+}
