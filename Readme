@@ -1,77 +1,74 @@
-#  Banking Transaction Processing System
+# Banking Transaction Processing System
 
-A secure and scalable banking backend built with Node.js, Express, MongoDB, and Redis.
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)
+![License](https://img.shields.io/github/license/Zaidshaikh2811/bank_transactions)
 
-This project simulates core banking operations including account management, deposits, withdrawals, fund transfers, ledger tracking, authentication, and transaction auditing while implementing production-grade backend engineering practices such as idempotency, rate limiting, token rotation, background jobs, database transactions, and CI/CD automation.
+A secure, scalable, and production-ready banking backend built with Node.js, Express, MongoDB, and Redis.
 
----
-
-##  Features
-
-###  Authentication & Authorization
-
-- User Registration
-- User Login
-- JWT Access Tokens
-- Refresh Token Rotation
-- Secure HTTP-only Cookies
-- Logout Support
-- Role-Based Access Control (RBAC)
-- Admin Account Management
+This project simulates real-world banking operations including account management, deposits, withdrawals, fund transfers, ledger accounting, authentication, transaction auditing, idempotency handling, background jobs, rate limiting, and CI/CD automation.
 
 ---
 
-###  User Management
+## Features
 
-- User Registration
-- Account Activation
-- Account Deactivation
-- Account Reactivation
-- Self Account Deactivation
-- Admin Controls
+### Authentication & Authorization
 
----
-###  Bank Accounts
+* User Registration
+* User Login
+* JWT Access Tokens
+* Refresh Token Rotation
+* Token Reuse Detection
+* Secure HTTP-Only Cookies
+* Logout Support
+* Role-Based Access Control (RBAC)
+* Admin Account Management
 
-- Create Savings Account
-- Create Current Account
-- Create Fixed Account
-- Maximum Account Limit Enforcement
-- One Savings Account Per User Rule
-- Unique Account Number Generation
-- Account Status Tracking
+### User Management
 
----
+* Account Activation via Email
+* Account Deactivation
+* Account Reactivation
+* Self Account Deactivation
+* Admin Controls
 
-###  Transaction Processing
+### Bank Accounts
 
-- Deposit Funds
-- Withdraw Funds
-- Transfer Funds
-- Transaction History
-- Transaction Lookup
-- Balance Verification
+* Savings Account Creation
+* Current Account Creation
+* Fixed Deposit Account Creation
+* Maximum Account Limit Enforcement
+* One Savings Account Per User Rule
+* Unique Account Number Generation
+* Account Status Tracking
 
----
+### Transaction Processing
 
-###  Ledger System
+* Deposit Funds
+* Withdraw Funds
+* Transfer Funds
+* Balance Verification
+* Transaction History
+* Transaction Lookup
+
+### Ledger System
 
 Every financial operation generates immutable ledger entries.
 
-Features:
+**Capabilities:**
 
-- Credit Entries
-- Debit Entries
-- Balance Before Tracking
-- Balance After Tracking
-- Transaction Linking
-- Audit Trail Support
+* Credit Entries
+* Debit Entries
+* Balance Before Tracking
+* Balance After Tracking
+* Transaction Linking
+* Complete Audit Trail
 
----
+### Reliability Features
 
-###  Reliability Features
-
-#### Idempotency Keys
+#### Idempotency Support
 
 Prevents duplicate financial operations.
 
@@ -79,96 +76,85 @@ Prevents duplicate financial operations.
 X-Idempotency-Key: unique-request-id
 ```
 
-Supported in:
+Supported for:
 
-- Account Creation
-- Deposits
-- Withdrawals
-- Transfers
+* Account Creation
+* Deposits
+* Withdrawals
+* Transfers
 
 #### Database Transactions
 
-MongoDB transactions ensure:
+MongoDB Transactions ensure:
 
-- Atomic Transfers
-- Consistent Account Balances
-- Reliable Ledger Creation
+* Atomic Transfers
+* Consistent Balances
+* Reliable Ledger Creation
+* Failure Recovery
 
----
+### Background Jobs
 
-###  Background Jobs
+Powered by BullMQ and Redis.
 
-Implemented using:
+#### Email Events
 
-- BullMQ
-- Redis
+* Welcome Email
+* Account Creation Notification
+* Deposit Notification
+* Withdrawal Notification
+* Transfer Notification
 
-Email events:
+### Security
 
-- Welcome Email
-- Account Creation Notification
-- Deposit Notification
-- Withdrawal Notification
-- Transfer Notification
+* JWT Authentication
+* Refresh Token Rotation
+* Token Reuse Detection
+* Rate Limiting
+* Helmet Security Headers
+* CORS Protection
+* Password Hashing (bcrypt)
+* Secure Cookies
+* Input Validation
+* Protected Routes
 
----
-
-### Security Features
-
-- JWT Authentication
-- Refresh Token Rotation
-- Token Reuse Detection
-- Rate Limiting
-- Helmet Security Headers
-- CORS Protection
-- Password Hashing (bcrypt)
-- Secure Cookies
-- Input Validation
-- Protected Routes
-
----
-
-###  Scalability
+### Scalability
 
 Node.js Cluster Mode enabled.
 
-Features:
+**Features**
 
-- Multi-core CPU utilization
-- Automatic Worker Respawn
-- Production-ready process management
+* Multi-Core CPU Utilization
+* Automatic Worker Respawn
+* Production-Ready Process Management
 
----
-
-###  Testing
+### Testing
 
 Implemented using:
 
-- Vitest
-- Supertest
+* Vitest
+* Supertest
 
 Coverage includes:
 
-- Authentication
-- Transactions
-- Business Logic
-- API Endpoints
+* Authentication Flows
+* Business Logic
+* Transactions
+* API Endpoints
 
----
-
-###  CI/CD
+### CI/CD
 
 GitHub Actions pipeline automatically:
 
-- Installs dependencies
-- Starts MongoDB service
-- Starts Redis service
-- Runs test suite
-- Uploads coverage artifacts
+* Installs Dependencies
+* Starts MongoDB
+* Starts Redis
+* Runs Test Suite
+* Uploads Coverage Reports
 
 ---
 
-##  Architecture
+## System Architecture
+
 ```text
 Client
    │
@@ -193,8 +179,6 @@ MongoDB Transactions
    ├── Transactions
    ├── Ledger Entries
    └── Refresh Tokens
-
-Background Jobs
    │
    ▼
 BullMQ + Redis
@@ -205,7 +189,7 @@ Email Notifications
 
 ---
 
-##  Project Structure
+## Project Structure
 
 ```text
 src
@@ -215,7 +199,7 @@ src
 │   ├── env.js
 │   └── mail.js
 │
-├── controller
+├── controllers
 │   ├── auth.controller.js
 │   ├── account.controller.js
 │   └── transaction.controller.js
@@ -252,84 +236,80 @@ src
 
 ---
 
-##  Tech Stack
+## Tech Stack
 
 ### Backend
 
-- Node.js
-- Express.js
+* Node.js
+* Express.js
 
 ### Database
 
-- MongoDB
-- Mongoose
+* MongoDB
+* Mongoose
 
 ### Queue Processing
 
-- BullMQ
-- Redis
+* BullMQ
+* Redis
 
 ### Authentication
 
-- JWT
-- Refresh Tokens
+* JWT
+* Refresh Tokens
 
 ### Security
 
-- Helmet
-- CORS
-- bcrypt
-- Express Rate Limit
+* Helmet
+* CORS
+* bcrypt
+* Express Rate Limit
 
 ### Testing
 
-- Vitest
-- Supertest
+* Vitest
+* Supertest
 
 ### DevOps
 
-- GitHub Actions
-- Node Cluster
+* GitHub Actions
+* Node.js Cluster Mode
 
 ---
 
-##  API Endpoints
+## API Endpoints
 
 ### Authentication
 
-| Method | Endpoint |
-|----------|-----------|
-| POST | /api/auth/register |
-| POST | /api/auth/login |
-| POST | /api/auth/refresh-token |
-| POST | /api/auth/logout |
-| PATCH | /api/auth/activate/:token |
-
----
+| Method | Endpoint                    |
+| ------ | --------------------------- |
+| POST   | `/api/auth/register`        |
+| POST   | `/api/auth/login`           |
+| POST   | `/api/auth/refresh-token`   |
+| POST   | `/api/auth/logout`          |
+| PATCH  | `/api/auth/activate/:token` |
 
 ### Accounts
 
-| Method | Endpoint |
-|----------|-----------|
-| POST | /api/accounts |
-
----
+| Method | Endpoint        |
+| ------ | --------------- |
+| POST   | `/api/accounts` |
 
 ### Transactions
 
-| Method | Endpoint |
-|----------|-----------|
-| POST | /api/transactions/deposit/:accountId |
-| POST | /api/transactions/withdraw/:accountId |
-| POST | /api/transactions/transfer |
-| GET | /api/transactions/history/:accountId |
-| GET | /api/transactions/ledger/:accountId |
-| GET | /api/transactions/verify/:accountId |
-| GET | /api/transactions/:transactionId |
+| Method | Endpoint                                |
+| ------ | --------------------------------------- |
+| POST   | `/api/transactions/deposit/:accountId`  |
+| POST   | `/api/transactions/withdraw/:accountId` |
+| POST   | `/api/transactions/transfer`            |
+| GET    | `/api/transactions/history/:accountId`  |
+| GET    | `/api/transactions/ledger/:accountId`   |
+| GET    | `/api/transactions/verify/:accountId`   |
+| GET    | `/api/transactions/:transactionId`      |
 
 ---
 
-##  Environment Variables
+## Environment Variables
 
 ```env
 PORT=3000
@@ -358,12 +338,13 @@ DAILY_TRANSFER_LIMIT=500000
 
 ---
 
-## ▶ Getting Started
+## Getting Started
 
 ### Clone Repository
 
 ```bash
 git clone https://github.com/Zaidshaikh2811/bank_transactions.git
+cd bank_transactions
 ```
 
 ### Install Dependencies
@@ -392,40 +373,46 @@ npm test
 
 ---
 
-##  Key Backend Concepts Demonstrated
+## Backend Concepts Demonstrated
 
-- JWT Authentication
-- Refresh Token Rotation
-- Token Reuse Detection
-- MongoDB Transactions
-- Idempotent APIs
-- Queue-Based Email Processing
-- Ledger Accounting
-- Role-Based Access Control
-- Cluster Mode Scaling
-- Rate Limiting
-- CI/CD Automation
-- Production Error Handling
+* JWT Authentication
+* Refresh Token Rotation
+* Token Reuse Detection
+* MongoDB Transactions
+* Idempotent APIs
+* Queue-Based Processing
+* Ledger Accounting
+* RBAC Authorization
+* Cluster-Based Scaling
+* Rate Limiting
+* CI/CD Automation
+* Production Error Handling
+* Audit Logging
 
 ---
 
-##  Author
+## Author
 
-### Zaid Shaikh
+**Zaid Shaikh**
 
 Software Engineer
 
-- Node.js
-- Express.js
-- MongoDB
-- PostgreSQL
-- React
-- Next.js
-- Distributed Systems
-- Backend Engineering
+**Skills**
+
+* Node.js
+* Express.js
+* MongoDB
+* PostgreSQL
+* Redis
+* React
+* Next.js
+* Distributed Systems
+* Backend Engineering
 
 GitHub: https://github.com/Zaidshaikh2811
 
 ---
 
-⭐ If you found this project useful, consider giving it a star.
+## Support
+
+If you found this project useful, consider giving it a ⭐ on GitHub.
