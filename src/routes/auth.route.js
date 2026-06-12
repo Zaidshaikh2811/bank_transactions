@@ -14,7 +14,7 @@ router.post('/register', register);
 router.post("/refresh-token", refreshToken);
 router.post("/logout", authMiddleware, logout);
 router.post("/logout-all", authMiddleware, logoutAllSessions);
-router.patch("/activate/:token", activateUser);
+router.patch("/verify/:token", activateUser);
 router.patch("/users/:userId/deactivate", authMiddleware, adminMiddleware, deactivateUser);
 router.patch("/users/:userId/reactivate", authMiddleware, adminMiddleware, reactivateUser);
 router.patch("/deactivate-my-account", authMiddleware, deactivateOwnAccount);

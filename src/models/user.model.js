@@ -93,7 +93,8 @@ userSchema.methods.generateRefreshToken = function () {
     const payload = {
         id: this._id,
         email: this.email,
-        name: this.name
+        name: this.name,
+        jti: crypto.randomUUID()
     };
     return jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
         expiresIn: process.env.REFRESH_TOKEN_EXPIRY || "7d"

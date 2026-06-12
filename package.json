@@ -11,7 +11,7 @@
     "test:watch": "vitest watch",
     "lint": "eslint src/**/*.js"
   },
-  "jest": {
+  "vitest": {
     "testEnvironment": "node",
     "testMatch": [
       "**/tests/**/*.test.js"

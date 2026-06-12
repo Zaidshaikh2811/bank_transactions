@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Run tests 
         env:
           NODE_ENV:          test
           MONGO_URI:    ${{ secrets.MONGO_URI }}
@@ -45,8 +45,7 @@ jobs:
           REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
           PORT : 3000
           MONGO_PASS: ${{ secrets.MONGO_PASS }}
-          MONGO_USER: ${{ secrets.MONGO_USER }} 
-          MONGO_USER: ${{ secrets.MONGO_USER }} 
+          MONGO_USER: ${{ secrets.MONGO_USER }}  
           
           ACCESS_TOKEN_EXPIRY: 15m
           

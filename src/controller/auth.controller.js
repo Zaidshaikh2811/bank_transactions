@@ -103,6 +103,7 @@ export const login = asyncHandler(async (req, res) => {
 export const refreshToken = asyncHandler(async (req, res) => {
 
     const cookies = cookie.parse(req.headers.cookie || "");
+    console.log("Received Refresh Token Cookie:", cookies.refreshToken);
 
     const refreshToken = cookies.refreshToken;;
     if (!refreshToken) {
@@ -150,14 +151,22 @@ export const refreshToken = asyncHandler(async (req, res) => {
         );
     }
 
-    storedToken.isRevoked = true;
-    await storedToken.save();
+
     const user = await User.findById(
         decoded.id
     );
-    if (!user || !(await user.comparePassword(password))) {
-        throw new ApiError(401, "Invalid credentials");
+    console.log(user);
+    if (!user) {
+        throw new ApiError(401, "User not found");
     }
+    if (!user.isActive) {
+        throw new ApiError(403, "Account is inactive");
+    }
+    // if (!user.isVerified) {
+    //     throw new ApiError(403, "Account is not verified");
+    // }
+    storedToken.isRevoked = true;
+    await storedToken.save();
     const newAccessToken = user.generateAccessToken();
     const newRefreshToken = user.generateRefreshToken();
     await RefreshToken.create({
@@ -169,7 +178,6 @@ export const refreshToken = asyncHandler(async (req, res) => {
             Number(process.env.REFRESH_TOKEN_EXPIRY)
         )
     });
-    user.save();
 
     res.cookie("refreshToken", newRefreshToken, {
         httpOnly: true,
@@ -272,11 +280,12 @@ export const deactivateUser = asyncHandler(async (req, res) => {
 
 export const activateUser = asyncHandler(async (req, res) => {
     const { token } = req.params;
+    console.log("Verification Token:", token);
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
     const userId = decoded.id;
     const user = await User.findOne({ _id: userId });
     if (!user) {
-        throw new ApiError(404, "Invalid activation token");
+        throw new ApiError(404, "Invalid verification token");
     }
     if (user.isVerified) {
         throw new ApiError(400, "User is already verified");
@@ -289,7 +298,7 @@ export const activateUser = asyncHandler(async (req, res) => {
         email: user.email
     }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
 
-    return new ApiResponse(200, "User activated successfully").send(res);
+    return new ApiResponse(200, "User verified successfully").send(res);
 });
 
 
