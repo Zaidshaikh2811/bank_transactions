@@ -115,7 +115,7 @@ export const transfer = asyncHandler(async (req, res) => {
     }
 
     const duplicate = await Transaction.findOne({ idempotencyKey: idoptencyKey });
-    console.log("Duplicate transaction check:", duplicate);
+
     if (duplicate) {
         return res.status(200).json({ message: "Transaction already processed", transactionId: duplicate._id });
     }
@@ -245,17 +245,17 @@ export const transfer = asyncHandler(async (req, res) => {
     })
 
     const receiverUser = await User.findById(transaction.receiverUserId).select("email");
-    console.log("Receiver user:", receiverUser);
+
 
     await Promise.all([
-        emailQueue.add("transfer", {
+        emailQueue.add("transaction-notification", {
             email: senderUser.email,
             amount,
             balance: transaction.senderBalance,
             type: "sent",
         }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } }),
 
-        emailQueue.add("transfer", {
+        emailQueue.add("transaction-notification", {
             email: receiverUser.email,
             amount,
             balance: transaction.receiverBalance,

@@ -6,6 +6,7 @@ import userRoutes from "./routes/accounts.route.js";
 import transactionRoutes from "./routes/transaction.route.js";
 import beneficiaryRoutes from "./routes/beneficiary.route.js";
 import adminRoutes from "./routes/admin.route.js";
+import bullMq from "./routes/bullMQ.route.js";
 import errorHandler from "./middleware/error.middleware.js";
 import cookies from "cookie-parser";
 import { authLimiter, generalLimiter, transferLimiter } from "./middleware/rateLimit.js";
@@ -77,6 +78,8 @@ app.use(cookieParser());
 
 
 app.get("/health", (_req, res) => res.json({ status: "ok", ts: Date.now() }));
+app.use("/admin/queues", authLimiter, bullMq);
+
 app.use("/api/admin", authLimiter, adminRoutes);
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/account", generalLimiter, userRoutes);

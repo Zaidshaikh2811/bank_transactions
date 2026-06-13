@@ -20,12 +20,19 @@ const sendEmail = async ({
         html
     };
 
-    const info =
-        await transporter.sendMail(
-            mailOptions
-        );
+    try {
 
-    return info;
+
+        const info =
+            await transporter.sendMail(
+                mailOptions
+            );
+
+        return info;
+    } catch (error) {
+        console.error("Error sending email:", error);
+        throw error;
+    }
 };
 
 
@@ -179,6 +186,53 @@ export const sendDepositEmail = async (email, amount, balance) => {
         <h1>Deposit Successful</h1>
         <p>
             Your deposit of ${amount} was successful. Your new balance is ${balance}.
+        </p>
+    `
+    });
+}
+
+
+export const sendOtpEmail = async (email, otp, expiresInMinutes) => {
+    return await sendEmail({
+        to: email,
+        subject: "Your OTP Code",
+        text: `Your OTP code is ${otp}. It will expire in ${expiresInMinutes} minutes.`,
+        html: `
+        <h1>Your OTP Code</h1>
+        <p>
+            Your OTP code is <strong>${otp}</strong>. It will expire in ${expiresInMinutes} minutes.
+        </p>
+    `
+    });
+}
+
+
+export const sendTransactionNotificationEmail = async (email, transactionDetails) => {
+    const { type, amount, date, description } = transactionDetails;
+    return await sendEmail({
+        to: email,
+        subject: `New ${type} Transaction`,
+        text: `A new ${type} transaction of ${amount} occurred on ${date}. Description: ${description}`,
+        html: `
+        <h1>New ${type} Transaction</h1>
+        <p>
+            A new ${type} transaction of <strong>${amount}</strong> occurred on ${date}.<br>
+            Description: ${description}
+        </p>
+    `
+    });
+}
+
+
+export const sendWithdrawEmail = async (email, amount, balance) => {
+    return await sendEmail({
+        to: email,
+        subject: "Withdrawal Successful",
+        text: `Your withdrawal of ${amount} was successful. Your new balance is ${balance}.`,
+        html: `
+        <h1>Withdrawal Successful</h1>
+        <p>
+            Your withdrawal of ${amount} was successful. Your new balance is ${balance}.
         </p>
     `
     });

@@ -6,7 +6,10 @@ import Beneficiary from "../models//beneficiary.model.js";
 import Account from "../models/account.model.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import { maskAccountNumber } from "../utils/account.utils.js";
+import { emailQueue } from "../queues/emailQueue.js";
+import Otp from "../models/otp.model.js";
 import mongoose from "mongoose";
+import { sendOtp } from "../utils/opt.utils.js";
 
 export const addBeneficiary = asyncHandler(async (req, res) => {
     const { accountNumber, nickname } = req.body;
@@ -35,7 +38,7 @@ export const addBeneficiary = asyncHandler(async (req, res) => {
         );
     }
 
-    const account = await Account.findById(accountNumber).select(
+    const account = await Account.findOne({ accountNumber }).select(
         "_id userId accountNumber accountType currency isActive"
     );
 
@@ -57,36 +60,88 @@ export const addBeneficiary = asyncHandler(async (req, res) => {
     });
 
     if (exists) {
-        if (!exists.isVerified) {
-            exists.isVerified = true;
-            exists.nickname = trimmedNickname;
-            await exists.save();
-
-            return new ApiResponse(200, "Beneficiary re-activated successfully", {
-                id: exists._id,
-                nickname: exists.nickname,
-                accountNumber: maskAccountNumber(account.accountNumber),
-                accountType: account.accountType,
-                currency: account.currency,
-            }).send(res);
+        if (exists.isVerified === true) {
+            throw new ApiError(409, "Beneficiary already exists and is active");
         }
+        exists.status = "pending";
+        exists.nickname = trimmedNickname;
+        await exists.save();
 
-        throw new ApiError(409, "Beneficiary already exists");
+    }
+    else {
+        await Beneficiary.create({
+            userId: req.user.id,
+            beneficiaryAccountId: account._id,
+            nickname: trimmedNickname,
+            status: "pending",
+        });
     }
 
-    const beneficiary = await Beneficiary.create({
+    await Otp.deleteMany({ userId: req.user.id, purpose: "add_beneficiary" });
+
+    const otp = await sendOtp({
         userId: req.user.id,
-        beneficiaryAccountId: account._id,
-        nickname: trimmedNickname,
+        purpose: "add_beneficiary",
+        meta: { beneficiaryAccountId: account._id.toString() },
     });
 
-    return new ApiResponse(201, "Beneficiary added successfully", {
+
+    return new ApiResponse(201, "OTP sent. Please confirm to activate beneficiary.", {
+        expiresInMinutes: process.env.OTP_TTL_MINUTES,
+        maskedContact: otp.maskedContact,
+    }).send(res);
+});
+
+export const confirmBeneficiaryOtp = asyncHandler(async (req, res) => {
+    const { otp } = req.body;
+
+    if (!otp) throw new ApiError(400, "OTP is required");
+
+    // Fetch and validate the OTP record (your Otp util handles hash comparison + expiry)
+    const otpRecord = await Otp.findOne({
+        userId: req.user.id,
+        purpose: "add_beneficiary",
+    });
+
+    if (!otpRecord) {
+        throw new ApiError(400, "No pending OTP found. Please add a beneficiary first.");
+    }
+    if (otpRecord.expiresAt < new Date()) {
+        await otpRecord.deleteOne();
+        throw new ApiError(400, "OTP has expired. Please add the beneficiary again.");
+    }
+    if (!otpRecord.verify(otp)) {        // verify() compares against stored hash
+        otpRecord.attempts += 1;
+        if (otpRecord.attempts >= 3) {
+            await otpRecord.deleteOne();
+            throw new ApiError(429, "Too many incorrect attempts. OTP invalidated.");
+        }
+        await otpRecord.save();
+        throw new ApiError(400, `Incorrect OTP. ${3 - otpRecord.attempts} attempt(s) remaining.`);
+    }
+
+    const beneficiary = await Beneficiary.findOneAndUpdate(
+        {
+            userId: req.user.id,
+            beneficiaryAccountId: otpRecord.meta.beneficiaryAccountId,
+            status: "pending",
+        },
+        { status: "active" },
+        { new: true }
+    ).populate("beneficiaryAccountId", "accountNumber accountType currency");
+
+    if (!beneficiary) {
+        throw new ApiError(404, "Pending beneficiary not found. It may have been removed.");
+    }
+
+    await otpRecord.deleteOne();
+
+    return new ApiResponse(200, "Beneficiary confirmed and activated", {
         id: beneficiary._id,
         nickname: beneficiary.nickname,
-        accountNumber: maskAccountNumber(account.accountNumber),
-        accountType: account.accountType,
-        currency: account.currency,
-        createdAt: beneficiary.createdAt,
+        accountNumber: maskAccountNumber(beneficiary.beneficiaryAccountId.accountNumber),
+        accountType: beneficiary.beneficiaryAccountId.accountType,
+        currency: beneficiary.beneficiaryAccountId.currency,
     }).send(res);
 });
 
@@ -144,14 +199,18 @@ export const removeBeneficiary = asyncHandler(async (req, res) => {
 
 
 export const transferToBeneficiary = asyncHandler(async (req, res) => {
-    const { beneficiaryId, amount, note } = req.body;
+    const { beneficiaryId, amount, note, senderAccountId } = req.body;
 
-    if (!beneficiaryId || amount === undefined) {
-        throw new ApiError(400, "Beneficiary ID and amount are required");
+    if (!beneficiaryId || amount === undefined || !senderAccountId) {
+        throw new ApiError(400, "Beneficiary ID, amount, and sender account ID are required");
     }
 
     if (!mongoose.Types.ObjectId.isValid(beneficiaryId)) {
         throw new ApiError(400, "Invalid beneficiary ID");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(senderAccountId)) {
+        throw new ApiError(400, "Invalid sender account ID");
     }
 
     const parsedAmount = parseFloat(amount);
@@ -172,13 +231,15 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
     }
 
     const senderAccount = await Account.findOne({
+        _id: senderAccountId,
         userId: req.user.id,
         isActive: "active",
     }).select("_id accountNumber balance currency");
 
     if (!senderAccount) {
-        throw new ApiError(404, "Your account was not found or is inactive");
+        throw new ApiError(404, "Sender account not found or inactive");
     }
+
 
     const beneficiary = await Beneficiary.findOne({
         _id: beneficiaryId,
@@ -198,6 +259,9 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
     if (!recipientAccount || recipientAccount.isVerified !== true) {
         throw new ApiError(400, "Recipient account is not verified");
     }
+    if (recipientAccount.userId?.toString() === req.user.id.toString()) {
+        throw new ApiError(400, "Cannot transfer to your own account");
+    }
 
     if (senderAccount.currency !== recipientAccount.currency) {
         throw new ApiError(
@@ -216,7 +280,7 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
     }
 
 
-    const transaction = withTransaction(async (session) => {
+    const { transaction, debitedSender } = await withTransaction(async (session) => {
         const debitedSender = await Account.findOneAndUpdate(
             {
                 _id: senderAccount._id,
@@ -246,7 +310,7 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
         }
 
 
-        const [transaction] = await Transaction.create(
+        const [completedTransaction] = await Transaction.create(
             [
                 {
                     senderId: req.user.id,
@@ -263,10 +327,11 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
             ],
             { session }
         );
+        return { completedTransaction, debitedSender };
 
     });
     return new ApiResponse(200, "Transfer successful", {
-        transactionId: transaction._id,
+        transactionId: completedTransaction._id,
         amount: parsedAmount,
         currency: senderAccount.currency,
         recipient: {
@@ -275,9 +340,12 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
             accountType: recipientAccount.accountType,
         },
         newBalance: debitedSender.balance,
-        timestamp: transaction.createdAt,
+        timestamp: completedTransaction.createdAt,
     }).send(res);
 
 
 
 });
+
+
+

@@ -6,14 +6,30 @@ import {
     sendDeactivationEmail,
     sendReactivationEmail,
     sendActivationEmail,
-    sendAccountActivatedEmail
+    sendAccountActivatedEmail,
+    sendTransactionNotificationEmail,
+    sendDepositEmail,
+    sendOtpEmail,
+    sendWithdrawEmail
 } from "../utils/sendEmail.js";
 
 const connection = { host: "localhost", port: 6379 };
 
-export const emailQueue = new Queue("emails", { connection });
+export const emailQueue = new Queue("emails", {
+    connection, defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+            type: "exponential",
+            delay: 5000,
+        },
+        // removeOnComplete: 100,
+        removeOnComplete: false,
+        removeOnFail: false,
+    },
+});
 
-new Worker("emails", async (job) => {
+const worker = new Worker("emails", async (job) => {
+
     switch (job.name) {
         case "welcome":
             await sendWelcomeEmail(job.data.email);
@@ -39,7 +55,29 @@ new Worker("emails", async (job) => {
         case "deposit":
             await sendDepositEmail(job.data.email, job.data.amount, job.data.balance);
             break;
+        case "withdraw":
+            await sendWithdrawEmail(job.data.email, job.data.amount, job.data.balance);
+            break;
+        case "otp-confirmation":
+            await sendOtpEmail(job.data.email, job.data.otp, job.data.expiresInMinutes);
+            break;
         default:
             console.warn(`Unknown job type: ${job.name}`);
     }
 }, { connection });
+
+worker.on("completed", (job) => {
+    console.log(`✅ Job ${job.id} completed`);
+});
+
+worker.on("failed", (job, err) => {
+    console.error(`❌ Job ${job?.id} failed:`, err.message);
+});
+
+worker.on("error", (err) => {
+    console.error("🚨 Worker Error:", err);
+});
+
+worker.on("stalled", (jobId) => {
+    console.warn(`⚠️ Job ${jobId} stalled`);
+});
