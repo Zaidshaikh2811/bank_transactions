@@ -10,7 +10,10 @@ import { TRANSACTION_TYPES } from "../models/transaction.model.js";
 import LedgerEntry from "../models/ledger.model.js";
 import User from "../models/user.model.js";
 import mongoose from "mongoose";
+import redis from "../config/redis.js";
+import Idempotency from "../models/idempotency.model.js";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 
 export const deposit = asyncHandler(async (req, res) => {
@@ -38,7 +41,6 @@ export const deposit = asyncHandler(async (req, res) => {
     }
 
     const user = await User.findById(req.user.id).select("email");
-    console.log("User found for deposit:", user);
     if (!user) throw new ApiError(404, "User not found");
 
     const transaction = await withTransaction(async (session) => {
@@ -90,15 +92,10 @@ export const deposit = asyncHandler(async (req, res) => {
 
 export const transfer = asyncHandler(async (req, res) => {
     const { senderAccountId, receiverAccountId, amount: rawAmount, description, deviceId } = req.body;
-    const idempotencyKey = req.headers["x-idempotency-key"];
 
 
     if (!senderAccountId || !receiverAccountId || !rawAmount) {
         throw new ApiError(400, "Sender account ID, receiver account ID, and amount are required");
-    }
-
-    if (!idempotencyKey) {
-        throw new ApiError(400, "Idempotency key is required");
     }
 
     if (senderAccountId === receiverAccountId) {
@@ -109,161 +106,268 @@ export const transfer = asyncHandler(async (req, res) => {
     validateAmount(amount, Number(process.env.MAX_TRANSFER_AMOUNT) || 500_000);
 
 
-    const idoptencyKey = req.headers["x-idempotency-key"];
-    if (!idoptencyKey) {
+    const idempotencyKey = req.headers["x-idempotency-key"];
+    if (!idempotencyKey) {
         throw new ApiError(400, "Idempotency key is required");
     }
-
-    const duplicate = await Transaction.findOne({ idempotencyKey: idoptencyKey });
-
-    if (duplicate) {
-        return res.status(200).json({ message: "Transaction already processed", transactionId: duplicate._id });
+    if (!UUID_RE.test(idempotencyKey)) {
+        throw new ApiError(400, "X-Idempotency-Key must be a valid UUID v4");
     }
 
-    const senderUser = await User.findById(req.user.id).select("email isActive isVerified");
-    console.log("Sender user:", senderUser);
-    if (!senderUser) {
-        throw new ApiError(404, "Sender account not found");
-    }
-    if (!senderUser.isVerified) {
-        throw new ApiError(403, "Please verify your email first");
-    }
-    if (senderUser._id.toString() !== req.user.id) {
-        throw new ApiError(403, "Unauthorized to transfer from this account");
-    }
-    if (!senderUser.isActive) {
-        throw new ApiError(403, "Sender account is not active");
+    const userId = req.user.id;
+    const lockKey = `idempotency:lock:${userId}:${idempotencyKey}`;
+    const cacheKey = `idempotency:done:${userId}:${idempotencyKey}`;
+
+    let cached = null;
+    try {
+        cached = await redis.get(cacheKey);
+    } catch (err) {
+        console.error("[transfer] Redis GET failed, falling through to DB:", err.message);
     }
 
-    const startDate = new Date();
-    startDate.setHours(0, 0, 0, 0);
+    if (cached) {
+        const { statusCode, body } = JSON.parse(cached);
+        return res
+            .status(statusCode)
+            .set("X-Idempotent-Replayed", "true")
+            .json(body);
+    }
 
-    const todayTotal = await Transaction.aggregate([
-        {
-            $match: {
-                senderAccount: new mongoose.Types.ObjectId(senderAccountId),
-                type: TRANSACTION_TYPES.TRANSFER,
-                status: "completed",
-                createdAt: { $gte: startDate }
-            }
-        },
-        {
-            $group: {
-                _id: null,
-                total: { $sum: "$amount" }
-            }
+    let lockAcquired = false;
+    try {
+        const result = await redis.set(lockKey, "1", "NX", "PX", LOCK_TTL_MS);
+        lockAcquired = result === "OK";
+    } catch (err) {
+        console.error("[transfer] Redis lock failed, falling through to DB:", err.message);
+        lockAcquired = true;
+    }
+
+    if (!lockAcquired) {
+        return res.status(409).json({
+            success: false,
+            message: "A transfer with this idempotency key is already being processed. Please wait and retry.",
+            retryAfterMs: LOCK_TTL_MS,
+        });
+    }
+
+
+
+    try {
+        const dbRecord = await Idempotency.findOne({
+            userId,
+            key: idempotencyKey,
+            purpose: "beneficiary_transfer",
+        });
+
+        if (dbRecord) {
+            await redis.set(
+                cacheKey,
+                JSON.stringify({ statusCode: dbRecord.statusCode, body: dbRecord.responseBody }),
+                "EX", CACHE_TTL_SECONDS
+            );
+            return res
+                .status(dbRecord.statusCode)
+                .set("X-Idempotent-Replayed", "true")
+                .json(dbRecord.responseBody);
         }
-    ]);
-
-    const dailySpent = todayTotal[0]?.total || 0;
-    if (dailySpent + amount > process.env.DAILY_TRANSFER_LIMIT) {
-        throw new ApiError(400,
-            `Daily transfer limit of $${process.env.DAILY_TRANSFER_LIMIT} exceeded. ` +
-            `You have $${process.env.DAILY_TRANSFER_LIMIT - dailySpent} remaining today`
-        );
-    }
-
-
-    const transaction = await withTransaction(async (session) => {
-        const senderAccount = await Account.findOne({ userId: senderAccountId }).session(session);
-        const receiverAccount = await Account.findOne({ userId: receiverAccountId }).session(session);
 
 
 
-        if (!senderAccount) throw new ApiError(404, "Sender account not found");
-        if (!receiverAccount) throw new ApiError(404, "Receiver account not found");
-        if (senderAccount.userId.toString() !== req.user.id) throw new ApiError(403, "You do not own the sender account");
 
+        const senderUser = await User.findById(req.user.id).select("email isActive isVerified");
+        if (!senderUser) {
+            throw new ApiError(404, "Sender account not found");
+        }
+        if (!senderUser.isVerified) {
+            throw new ApiError(403, "Please verify your email first");
+        }
+        if (!senderUser.isActive) {
+            throw new ApiError(403, "Sender account is not active");
+        }
 
-        if (senderAccount.isActive !== "active") throw new ApiError(403, "Sender account is inactive");
-        if (receiverAccount.isActive !== "active") throw new ApiError(403, "Receiver account is inactive");
+        const startDate = new Date();
+        startDate.setHours(0, 0, 0, 0);
 
-        console.log("Account status verified");
+        const todayTotal = await Transaction.aggregate([
+            {
+                $match: {
+                    senderAccount: new mongoose.Types.ObjectId(senderAccountId),
+                    type: TRANSACTION_TYPES.TRANSFER,
+                    status: "completed",
+                    createdAt: { $gte: startDate }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: "$amount" }
+                }
+            }
+        ]);
 
-        if (senderAccount.currency !== receiverAccount.currency) {
+        const dailySpent = todayTotal[0]?.total || 0;
+        if (dailySpent + amount > Number(process.env.DAILY_TRANSFER_LIMIT)) {
             throw new ApiError(400,
-                `Currency mismatch: sender uses ${senderAccount.currency}, ` +
-                `receiver uses ${receiverAccount.currency}`
+                `Daily transfer limit of $${process.env.DAILY_TRANSFER_LIMIT} exceeded. ` +
+                `You have $${process.env.DAILY_TRANSFER_LIMIT - dailySpent} remaining today`
             );
         }
-        if (senderAccount.balance < amount) throw new ApiError(400, "Insufficient funds in sender account");
 
-        senderAccount.balance = parseFloat((senderAccount.balance - amount).toFixed(2));
-        receiverAccount.balance = parseFloat((receiverAccount.balance + amount).toFixed(2));
+
+        const transaction = await withTransaction(async (session) => {
+            const senderAccount = await Account.findOne({ userId: senderAccountId }).session(session);
+            const receiverAccount = await Account.findOne({ userId: receiverAccountId }).session(session);
+
+
+
+            if (!senderAccount) throw new ApiError(404, "Sender account not found");
+            if (!receiverAccount) throw new ApiError(404, "Receiver account not found");
+            if (senderAccount.userId.toString() !== req.user.id) throw new ApiError(403, "You do not own the sender account");
+
+
+            if (senderAccount.isActive !== "active") throw new ApiError(403, "Sender account is inactive");
+            if (receiverAccount.isActive !== "active") throw new ApiError(403, "Receiver account is inactive");
+
+
+            if (senderAccount.currency !== receiverAccount.currency) {
+                throw new ApiError(400,
+                    `Currency mismatch: sender uses ${senderAccount.currency}, ` +
+                    `receiver uses ${receiverAccount.currency}`
+                );
+            }
+
+            const debitedSender = await Account.findOneAndUpdate(
+                {
+                    _id: senderAccount._id,
+                    balance: { $gte: amount },
+                    isActive: "active",
+                },
+                { $inc: { balance: -amount } },
+                { new: true, session }
+            );
+
+            if (!debitedSender) {
+                throw new ApiError(400, "Insufficient funds or account locked");
+            }
+
+            const creditedReceiver = await Account.findOneAndUpdate(
+                { _id: receiverAccount._id, isActive: "active" },
+                { $inc: { balance: amount } },
+                { new: true, session }
+            );
+
+            if (!creditedReceiver) {
+                throw new ApiError(400, "Transfer failed: receiver account unavailable");
+            }
+            const responseBody = {
+                success: true,
+                message: "Transfer successful",
+                data: {
+                    transactionId: null,
+                    amount,
+                    currency: senderAccount.currency,
+                    senderBalance: debitedSender.balance,
+                    processedAt: new Date(),
+                },
+            };
+
+
+            const txn = new Transaction({
+                senderAccount: senderAccount._id,
+                receiverAccount: receiverAccount._id,
+                type: TRANSACTION_TYPES.TRANSFER,
+                amount,
+                currency: senderAccount.currency,
+                description: description || TRANSACTION_TYPES.TRANSFER,
+                idempotencyKey: idempotencyKey,
+                balanceAfter: debitedSender.balance,
+                metadata: {
+                    ip: req.ip,
+                    userAgent: req.get("User-Agent"),
+                    deviceId
+                },
+                processedAt: new Date(),
+            });
+            await txn.save({ session });
+            responseBody.data.transactionId = txn._id;
+            const ledgerEntries = [
+                new LedgerEntry({
+                    transactionId: txn._id,
+                    accountId: senderAccount._id,
+                    type: "DEBIT",
+                    amount,
+                    balanceBefore: debitedSender.balance + amount,
+                    balanceAfter: debitedSender.balance,
+                    currency: senderAccount.currency,
+                    description: description || "Transfer to " + receiverAccount.accountNumber,
+                }),
+                new LedgerEntry({
+                    transactionId: txn._id,
+                    accountId: receiverAccount._id,
+                    type: "CREDIT",
+                    amount,
+                    balanceBefore: creditedReceiver.balance - amount,
+                    balanceAfter: creditedReceiver.balance,
+                    currency: receiverAccount.currency,
+                    description: description || "Transfer from " + senderAccount.accountNumber,
+                })
+            ];
+            await LedgerEntry.insertMany(ledgerEntries, { session });
+            await Idempotency.create(
+                [{
+                    userId,
+                    key: idempotencyKey,
+                    purpose: "beneficiary_transfer",
+                    statusCode: 200,
+                    responseBody,
+                }],
+                { session }
+            );
+
+            return {
+                responseBody,
+                transaction: txn,
+                senderBalance: debitedSender.balance,
+                receiverBalance: creditedReceiver.balance,
+                receiverUserId: receiverAccount.userId,
+            };
+        })
+
+
+
+        await redis.set(
+            cacheKey,
+            JSON.stringify({ statusCode: 200, body: transaction.responseBody }),
+            "EX", CACHE_TTL_SECONDS
+        ).catch((err) => {
+            console.error("[transfer] Failed to set Redis cache:", err.message);
+        });
+        const receiverUser = await User.findById(transaction.receiverUserId).select("email");
+
 
         await Promise.all([
-            senderAccount.save({ session }),
-            receiverAccount.save({ session })
-        ]);
-        const txn = new Transaction({
-            senderAccount: senderAccount._id,
-            receiverAccount: receiverAccount._id,
-            type: TRANSACTION_TYPES.TRANSFER,
-            amount,
-            currency: senderAccount.currency,
-            description: description || TRANSACTION_TYPES.TRANSFER,
-            idempotencyKey: idempotencyKey,
-            balanceAfter: senderAccount.balance,
-            metadata: {
-                ip: req.ip,
-                userAgent: req.get("User-Agent"),
-                deviceId
-            },
-            processedAt: new Date(),
+            emailQueue.add("transaction-notification", {
+                email: senderUser.email,
+                amount,
+                balance: transaction.senderBalance,
+                type: "sent",
+            }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } }),
+
+            emailQueue.add("transaction-notification", {
+                email: receiverUser.email,
+                amount,
+                balance: transaction.receiverBalance,
+                type: "received",
+            }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } }),
+        ]).catch((err) => {
+            console.error("[transfer] Failed to enqueue email notifications:", err.message);
         });
-        await txn.save({ session });
-        const ledgerEntries = [
-            new LedgerEntry({
-                transactionId: txn._id,
-                accountId: senderAccount._id,
-                type: "DEBIT",
-                amount,
-                balanceBefore: senderAccount.balance + amount,
-                balanceAfter: senderAccount.balance,
-                currency: senderAccount.currency,
-                description: description || "Transfer to " + receiverAccount.accountNumber,
-            }),
-            new LedgerEntry({
-                transactionId: txn._id,
-                accountId: receiverAccount._id,
-                type: "CREDIT",
-                amount,
-                balanceBefore: receiverAccount.balance - amount,
-                balanceAfter: receiverAccount.balance,
-                currency: receiverAccount.currency,
-                description: description || "Transfer from " + senderAccount.accountNumber,
-            })
-        ];
-        await LedgerEntry.insertMany(ledgerEntries, { session });
-
-        return {
-            transaction: txn,
-            senderBalance: senderAccount.balance,
-            receiverBalance: receiverAccount.balance,
-            receiverUserId: receiverAccount.userId,
-        };
-    })
-
-    const receiverUser = await User.findById(transaction.receiverUserId).select("email");
-
-
-    await Promise.all([
-        emailQueue.add("transaction-notification", {
-            email: senderUser.email,
-            amount,
-            balance: transaction.senderBalance,
-            type: "sent",
-        }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } }),
-
-        emailQueue.add("transaction-notification", {
-            email: receiverUser.email,
-            amount,
-            balance: transaction.receiverBalance,
-            type: "received",
-        }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } }),
-    ]);
-    return new ApiResponse(201, "Transfer successful", transaction).send(res);
-
+        return new ApiResponse(201, "Transfer successful", transaction.responseBody).send(res);
+    } finally {
+        await redis.del(lockKey).catch((err) => {
+            console.error("[transfer] Failed to release Redis lock:", err.message);
+        });
+    }
 })
 
 

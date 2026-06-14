@@ -84,7 +84,7 @@ app.use("/api/admin", authLimiter, adminRoutes);
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/account", generalLimiter, userRoutes);
 app.use("/api/transaction", transferLimiter, transactionRoutes);
-app.use("/api/beneficiary", beneficiaryRoutes);
+app.use("/api/beneficiary", transferLimiter, beneficiaryRoutes);
 
 app.use(errorHandler);
 export default app;

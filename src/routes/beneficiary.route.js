@@ -4,7 +4,8 @@ import {
     addBeneficiary,
     getBeneficiaries,
     removeBeneficiary,
-    transferToBeneficiary
+    transferToBeneficiary,
+    confirmBeneficiaryOtp
 } from "../controller/beneficiary.controller.js";
 
 const router = express.Router();
@@ -12,6 +13,8 @@ const router = express.Router();
 router.post("/", authMiddleware, addBeneficiary);
 
 router.get("/", authMiddleware, getBeneficiaries);
+
+router.post("/confirm-otp", authMiddleware, confirmBeneficiaryOtp);
 
 router.delete("/:beneficiaryId", authMiddleware, removeBeneficiary);
 

@@ -10,9 +10,11 @@ import { emailQueue } from "../queues/emailQueue.js";
 import Otp from "../models/otp.model.js";
 import mongoose from "mongoose";
 import { sendOtp } from "../utils/opt.utils.js";
+import Idoempotency from "../models/idempotency.model.js";
 
 export const addBeneficiary = asyncHandler(async (req, res) => {
     const { accountNumber, nickname } = req.body;
+    const idempotencyKey = req.header("X-Idempotency-Key");
 
     if (!accountNumber || !nickname) {
         throw new ApiError(400, "Account number and nickname are required");
@@ -26,6 +28,12 @@ export const addBeneficiary = asyncHandler(async (req, res) => {
     if (!/^[a-zA-Z0-9 _'-]+$/.test(trimmedNickname)) {
         throw new ApiError(400, "Nickname contains invalid characters");
     }
+
+    const existingIdoempotency = await Idoempotency.findOne({
+        userId: req.user.id,
+        key: idempotencyKey,
+        purpose: "add_beneficiary",
+    });
 
     const activeCount = await Beneficiary.countDocuments({
         userId: req.user.id,
@@ -63,7 +71,7 @@ export const addBeneficiary = asyncHandler(async (req, res) => {
         if (exists.isVerified === true) {
             throw new ApiError(409, "Beneficiary already exists and is active");
         }
-        exists.status = "pending";
+        exists.isVerified = false;
         exists.nickname = trimmedNickname;
         await exists.save();
 
@@ -73,7 +81,7 @@ export const addBeneficiary = asyncHandler(async (req, res) => {
             userId: req.user.id,
             beneficiaryAccountId: account._id,
             nickname: trimmedNickname,
-            status: "pending",
+            isVerified: false,
         });
     }
 
@@ -97,7 +105,6 @@ export const confirmBeneficiaryOtp = asyncHandler(async (req, res) => {
 
     if (!otp) throw new ApiError(400, "OTP is required");
 
-    // Fetch and validate the OTP record (your Otp util handles hash comparison + expiry)
     const otpRecord = await Otp.findOne({
         userId: req.user.id,
         purpose: "add_beneficiary",
@@ -110,7 +117,7 @@ export const confirmBeneficiaryOtp = asyncHandler(async (req, res) => {
         await otpRecord.deleteOne();
         throw new ApiError(400, "OTP has expired. Please add the beneficiary again.");
     }
-    if (!otpRecord.verify(otp)) {        // verify() compares against stored hash
+    if (!otpRecord.verify(otp)) {
         otpRecord.attempts += 1;
         if (otpRecord.attempts >= 3) {
             await otpRecord.deleteOne();
@@ -124,9 +131,9 @@ export const confirmBeneficiaryOtp = asyncHandler(async (req, res) => {
         {
             userId: req.user.id,
             beneficiaryAccountId: otpRecord.meta.beneficiaryAccountId,
-            status: "pending",
+            isVerified: false,
         },
-        { status: "active" },
+        { isVerified: true },
         { new: true }
     ).populate("beneficiaryAccountId", "accountNumber accountType currency");
 
