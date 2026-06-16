@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 
-
 const ledgerSchema = new mongoose.Schema({
     transactionId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -18,24 +17,20 @@ const ledgerSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ["TRANSFER",
-            "DEPOSIT",
+        enum: [
             "CREDIT",
-            "DEBIT",
-            "WITHDRAW",
-            "BILL_PAYMENT",
-            "REFUND",],
+            "DEBIT",],
         required: [true, "Ledger entry type is required"],
         immutable: true,
     },
     amount: {
         type: Number,
         required: [true, "Amount is required"],
-        min: [0.01, "Amount must be at least 0.01"],
+        min: [1, "Amount must be at least 1 cent"],
         immutable: true,
     },
-    balanceBefore: { type: Number, required: true },
-    balanceAfter: { type: Number, required: true },
+    balanceBeforeCents: { type: Number, required: true, immutable: true },
+    balanceAfterCents: { type: Number, required: true, immutable: true },
     currency: {
         type: String,
         required: [true, "Currency is required"],

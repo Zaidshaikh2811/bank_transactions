@@ -24,10 +24,10 @@ const redisClient = new redis({
     lazyConnect: false,
 });
 
-redis.on("connect", () => console.log("[Redis] Connected"));
-redis.on("ready", () => console.log("[Redis] Ready"));
-redis.on("error", (err) => console.error("[Redis] Error:", err.message));
-redis.on("close", () => console.warn("[Redis] Connection closed"));
-redis.on("reconnecting", () => console.warn("[Redis] Reconnecting..."));
+redisClient.on("connect", () => console.log("[Redis] Connected"));
+redisClient.on("ready", () => console.log("[Redis] Ready"));
+redisClient.on("error", (err) => console.error("[Redis] Error:", err.message));
+redisClient.on("close", () => console.warn("[Redis] Connection closed"));
+redisClient.on("reconnecting", () => console.warn("[Redis] Reconnecting..."));
 
-export default redis;
+export default redisClient;

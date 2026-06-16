@@ -45,7 +45,7 @@ const transactionSchema = new mongoose.Schema(
         amount: {
             type: Number,
             required: [true, "Amount is required"],
-            min: [0.01, "Amount must be at least 0.01"],
+            min: [1, "Minimum amount is 1 cent"]
         },
 
         currency: {
@@ -86,8 +86,8 @@ const transactionSchema = new mongoose.Schema(
 
 
 
-transactionSchema.index({ fromAccount: 1, createdAt: -1 });
-transactionSchema.index({ toAccount: 1, createdAt: -1 });
+transactionSchema.index({ senderAccount: 1, createdAt: -1 });
+transactionSchema.index({ receiverAccount: 1, createdAt: -1 });
 transactionSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
 
 

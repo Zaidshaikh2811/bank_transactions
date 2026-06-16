@@ -22,8 +22,8 @@ export const emailQueue = new Queue("emails", {
             type: "exponential",
             delay: 5000,
         },
-        // removeOnComplete: 100,
-        removeOnComplete: false,
+        removeOnComplete: 100,
+        // removeOnComplete: false,
         removeOnFail: false,
     },
 });

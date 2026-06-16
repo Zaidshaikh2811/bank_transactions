@@ -51,7 +51,8 @@ const bankAccountSchema = new mongoose.Schema({
         unique: true,
     }
 }, {
-    timestamps: true
+    timestamps: true,
+    optimisticConcurrency: true
 });
 
 bankAccountSchema.index({ userId: 1, currency: 1 });
