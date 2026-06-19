@@ -1,5 +1,5 @@
 
-import ApiError from "../utils/ApiError.js";
+import ApiError from "./ApiError.js";
 
 
 export const validateAmount = (amount, max) => {

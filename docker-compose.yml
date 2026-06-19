@@ -1,45 +1,65 @@
 version: "3.9"
 
 services:
-  app:
-    build: .
-    container_name: banking-api
+   
+   redis:
+     image: redis:alpine
+     container_name: redis
+     ports:
+       - "6379:6379"
+     volumes:
+       - redis-data:/data
+     networks:
+       - banking-network
+     healthcheck:
+       test: ["CMD", "redis-cli", "ping"]
+       interval: 30s
+       timeout: 10s
+       retries: 5
 
-    ports:
-      - "3000:3000"
 
-    environment:
-      NODE_ENV: production
-      PORT: 3000
+   redis-cache:
+     image: redis
+     container_name: redis-cache
+     ports:
+       - "6380:6379"
+     volumes:
+       - redis-cache-data:/data
+     networks:
+       - banking-network
+     healthcheck:
+       test: ["CMD", "redis-cli", "ping"]
+       interval: 30s
+       timeout: 10s
+       retries: 5     
 
-      MONGO_URI: mongodb://mongo:27017/banking
 
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+   node-app:
+     build: ./app
+     container_name: node-app
+     ports:
+       - "3000:3000"
+     environment:
+       - REDIS_HOST=redis
+       - REDIS_PORT=6379
+       - REDIS_CACHE_HOST=redis-cache
+       - REDIS_CACHE_PORT=6379
+     volumes:
+       - ./app:/app
+       - /app/node_modules
+     depends_on:
+       redis:
+         condition: service_healthy
+       redis-cache:
+         condition: service_healthy
+     networks:
+       - banking-network     
 
-      ACCESS_TOKEN_SECRET: your-secret
-      REFRESH_TOKEN_SECRET: your-refresh-secret
 
-    depends_on:
-      - mongo
-      - redis
-
-  mongo:
-    image: mongo:8
-    container_name: banking-mongo
-
-    ports:
-      - "27017:27017"
-
-    volumes:
-      - mongo_data:/data/db
-
-  redis:
-    image: redis:8-alpine
-    container_name: banking-redis
-
-    ports:
-      - "6379:6379"
+networks:
+  banking-network:
+    driver: bridge
 
 volumes:
-  mongo_data:
+  redis-data:
+  redis-cache-data:

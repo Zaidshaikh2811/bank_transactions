@@ -13,7 +13,7 @@ import {
     sendWithdrawEmail
 } from "../utils/sendEmail.js";
 
-const connection = { host: "localhost", port: 6379 };
+const connection = { host: process.env.REDIS_HOST || "redis-cache", port: process.env.REDIS_PORT || 6379 };
 
 export const emailQueue = new Queue("emails", {
     connection, defaultJobOptions: {

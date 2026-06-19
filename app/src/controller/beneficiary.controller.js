@@ -2,7 +2,7 @@
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import Beneficiary from "../models//beneficiary.model.js";
+import Beneficiary from "../models/beneficiary.model.js";
 import Account from "../models/account.model.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import { maskAccountNumber } from "../utils/account.utils.js";
