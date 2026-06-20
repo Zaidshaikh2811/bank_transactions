@@ -2,7 +2,7 @@ import asyncHandler from "../utils/asyncHandler.js";
 import Account from "../models/account.model.js";
 import Transaction from "../models/transaction.model.js";
 import ApiError from "../utils/ApiError.js";
-import { validateAmount } from "../utils/transaction.utils.js";
+import { acquireRedisLock, checkRedisCache, parseAndValidateIdempotency, releaseLock, validateAmount } from "../utils/transaction.utils.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { emailQueue } from "../queues/emailQueue.js";
@@ -12,18 +12,7 @@ import User from "../models/user.model.js";
 import mongoose from "mongoose";
 import redis from "../config/redis.js";
 import Idempotency from "../models/idempotency.model.js";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LOCK_RELEASE_SCRIPT = `
-  if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("del", KEYS[1])
-  else
-    return 0
-  end
-`;
-
-const toCents = (v) => Math.round(Number(v) * 100);
-const fromCents = (v) => +(v / 100).toFixed(2);
+import crypto from "crypto";
 
 
 export const deposit = asyncHandler(async (req, res) => {
@@ -107,7 +96,7 @@ export const deposit = asyncHandler(async (req, res) => {
             await redis.set(
                 cacheKey,
                 JSON.stringify({ statusCode: dbRecord.statusCode, body: dbRecord.responseBody }),
-                "EX", CACHE_TTL_SECONDS
+                "EX", Number(process.env.CACHE_TTL_SECONDS)
             );
             return res
                 .status(dbRecord.statusCode)
@@ -258,7 +247,7 @@ export const transfer = asyncHandler(async (req, res) => {
             await redis.set(
                 cacheKey,
                 JSON.stringify({ statusCode: dbRecord.statusCode, body: dbRecord.responseBody }),
-                "EX", CACHE_TTL_SECONDS
+                "EX", Number(process.env.CACHE_TTL_SECONDS)
             );
             return res
                 .status(dbRecord.statusCode)
@@ -340,7 +329,7 @@ export const transfer = asyncHandler(async (req, res) => {
                     isActive: "active",
                     __v: senderAccount.__v,
                 },
-                { $inc: { balance: -amountCents } },
+                { $inc: { balance: -amountCents, __v: 1 } },
                 { new: true, session }
             );
 
@@ -350,7 +339,7 @@ export const transfer = asyncHandler(async (req, res) => {
 
             const creditedReceiver = await Account.findOneAndUpdate(
                 { _id: receiverAccount._id, isActive: "active", __v: receiverAccount.__v, },
-                { $inc: { balance: amountCents } },
+                { $inc: { balance: amountCents, __v: 1 } },
                 { new: true, session }
             );
 
@@ -437,7 +426,7 @@ export const transfer = asyncHandler(async (req, res) => {
         await redis.set(
             cacheKey,
             JSON.stringify({ statusCode: 200, body: transaction.responseBody }),
-            "EX", CACHE_TTL_SECONDS
+            "EX", Number(process.env.CACHE_TTL_SECONDS)
         ).catch((err) => {
             console.error("[transfer] Failed to set Redis cache:", err.message);
         });
@@ -473,89 +462,203 @@ export const withdraw = asyncHandler(async (req, res) => {
     const { accountId } = req.params;
     const amount = parseFloat(req.body.amount);
     const { description } = req.body;
-    const idempotencyKey = req.headers["x-idempotency-key"];
-
-    if (!amount) throw new ApiError(400, "Amount is required");
-    if (!accountId) throw new ApiError(400, "Account ID is required");
-    if (!idempotencyKey) throw new ApiError(400, "Idempotency key is required");
-
-    validateAmount(amount, Number(process.env.MAX_WITHDRAW_AMOUNT) || 1_000_000);
-
-    const duplicate = await Transaction.findOne({ idempotencyKey });
-    if (duplicate) return res.status(200).json({ message: "Transaction already processed", transactionId: duplicate._id });
-
-    const user = await User.findById(req.user.id).select("email");
-    if (!user) throw new ApiError(404, "User not found");
-    const transaction = await withTransaction(async (session) => {
-        const account = await Account.findById(accountId).session(session);
-        if (!account) throw new ApiError(404, "Account not found");
-        const balanceBefore = account.balance;
-        if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to withdraw from this account");
-        if (!account.isActive) throw new ApiError(403, "Account is not active");
-        if (account.balance < amount) throw new ApiError(400, "Insufficient funds");
-
-        account.balance = parseFloat((account.balance - amount).toFixed(2));
-        await account.save({ session });
-        const transaction = new Transaction({
-            senderAccount: account._id,
-            type: TRANSACTION_TYPES.WITHDRAW,
-            amount,
-            currency: account.currency,
-            description: description || TRANSACTION_TYPES.WITHDRAW,
-            idempotencyKey,
-            balanceAfter: account.balance,
-            metadata: {
-                ip: req.ip,
-                userAgent: req.get("User-Agent"),
-            },
-            processedAt: new Date(),
-        });
-
-        await transaction.save({ session });
-        const ledger = new LedgerEntry({
-            transactionId: transaction._id,
-            accountId: account._id,
-            type: "WITHDRAW",
-            amount,
-            balanceBefore,
-            balanceAfter: account.balance,
-            currency: account.currency,
-            description: description || "Withdrawal from account",
-        });
-
-        await ledger.save({ session });
-
-        return transaction;
-    });
-
-    await emailQueue.add("withdraw", {
-        email: user.email,
+    const { amountCents, idempotencyKey } = parseAndValidateIdempotency(
         amount,
-        balance: transaction.balanceAfter
-    }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
-    return new ApiResponse(200, "Withdrawal successful", { transaction }).send(res);
+        req.headers["x-idempotency-key"],
+        "MAX_WITHDRAW_AMOUNT",
+        Number(process.env.MAX_WITHDRAW_AMOUNT),
+    );
+    if (!amount) throw new ApiError(400, "Amount is required");
+    if (!accountId) throw new ApiError(400, "Account ID is required");;
+
+
+    const userId = req.user.id;
+    const lockKey = `idempotency:lock:${userId}:${idempotencyKey}`;
+    const cacheKey = `idempotency:done:${userId}:${idempotencyKey}`;
+
+    let cached = await checkRedisCache(cacheKey, "withdraw");
+    if (cached) {
+        return res
+            .status(cached.statusCode)
+            .set("X-Idempotent-Replayed", "true")
+            .json(cached.body);
+    }
+
+
+    const { lockAcquired, lockToken } = await acquireRedisLock(lockKey, "withdraw");
+    if (!lockAcquired) {
+        return res.status(409).json({
+            success: false,
+            message: "A withdrawal with this idempotency key is already being processed. Please wait and retry.",
+            retryAfterMs: LOCK_TTL_MS,
+        });
+    }
+
+    try {
+
+        const dbRecord = await Idempotency.findOne({
+            userId,
+            key: idempotencyKey,
+            purpose: "withdraw",
+        });
+
+        if (dbRecord) {
+            await redis.set(
+                cacheKey,
+                JSON.stringify({ statusCode: dbRecord.statusCode, body: dbRecord.responseBody }),
+                "EX", Number(process.env.CACHE_TTL_SECONDS)
+            );
+            return res
+                .status(dbRecord.statusCode)
+                .set("X-Idempotent-Replayed", "true")
+                .json(dbRecord.responseBody);
+        }
+
+
+
+
+
+
+        const user = await User.findById(req.user.id).select("email");
+        if (!user) throw new ApiError(404, "User not found");
+        const { transaction: txn, responseBody } = await withTransaction(async (session) => {
+            const account = await Account.findById(accountId).session(session);
+            if (!account) throw new ApiError(404, "Account not found");
+            const balanceBefore = account.balance;
+            if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to withdraw from this account");
+            if (!account.isActive) throw new ApiError(403, "Account is not active");
+            if (account.balance < amountCents) throw new ApiError(400, "Insufficient funds");
+
+
+
+            const updated = await Account.findOneAndUpdate(
+                {
+                    _id: account._id,
+                    balance: { $gte: amountCents },
+                    isActive: "active",
+                    __v: account.__v,
+                },
+                { $inc: { balance: -amountCents, __v: 1 } },
+                { new: true, session },
+            );
+
+            if (!updated) {
+                throw new ApiError(400, "Insufficient funds or account locked");
+            }
+
+            await account.save({ session });
+            const transaction = new Transaction({
+                senderAccount: account._id,
+                type: TRANSACTION_TYPES.WITHDRAW,
+                amount: fromCents(amountCents),
+                currency: account.currency,
+                description: description || TRANSACTION_TYPES.WITHDRAW,
+                idempotencyKey,
+                balanceAfter: account.balance,
+                metadata: {
+                    ip: req.ip,
+                    userAgent: req.get("User-Agent"),
+                },
+                processedAt: new Date(),
+            });
+
+            await transaction.save({ session });
+            const ledger = new LedgerEntry({
+                transactionId: transaction._id,
+                accountId: account._id,
+                type: "WITHDRAW",
+                amount: fromCents(amountCents),
+                balanceBefore,
+                balanceAfter: account.balance,
+                currency: account.currency,
+                description: description || "Withdrawal from account",
+            });
+
+            await ledger.save({ session });
+
+            const responseBody = {
+                success: true,
+                message: "Withdrawal successful",
+                data: {
+                    transactionId: transaction._id,
+                    amount: fromCents(amountCents),
+                    currency: account.currency,
+                    balance: fromCents(account.balance),
+                    processedAt: transaction.processedAt,
+                },
+            };
+
+            await Idempotency.create({
+                userId,
+                key: idempotencyKey,
+                purpose: "withdraw",
+                statusCode: 200,
+                responseBody,
+            }, { session });
+
+            return { transaction, responseBody };
+        });
+
+        await redis
+            .set(cacheKey, JSON.stringify({ statusCode: 200, body: responseBody }), "EX", Number(process.env.CACHE_TTL_SECONDS))
+            .catch((e) => console.error("[withdraw] Failed to set Redis cache:", e.message));
+
+
+        await emailQueue.add("withdraw", {
+            email: user.email,
+            amount: fromCents(amountCents),
+            balance: transaction.balanceAfter
+        }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+        return new ApiResponse(200, "Withdrawal successful", { transaction }).send(res);
+    }
+    finally {
+        await releaseLock(lockKey, lockToken, "withdraw");
+    }
 })
 
 
 export const getTransactionHistory = asyncHandler(async (req, res) => {
     const { accountId } = req.params;
-    const { page = 1, limit = 10, type, startDate, endDate } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const { type, startDate, endDate } = req.query;
+
 
     const account = await Account.findById(accountId);
     if (!account) throw new ApiError(404, "Account not found");
     if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to view transactions for this account");
+
+    const cacheKey = `txn:history:${accountId}:p${page}:l${limit}:t${type || ""}:s${startDate || ""}:e${endDate || ""}`;
+    const cached = await checkRedisCache(cacheKey, "getTransactionHistory");
+    if (cached) {
+        return res.set("X-Cache", "HIT").status(200).json(cached.body);
+    }
+
+
     const filter = {
         $or: [{ senderAccount: accountId }, { receiverAccount: accountId }]
     };
-
+    const ALLOWED_TYPES = new Set(Object.values(TRANSACTION_TYPES));
     if (type) {
-        filter.type = type.toUpperCase();
+        const upperType = type.toUpperCase();
+        if (!ALLOWED_TYPES.has(upperType)) {
+            throw new ApiError(400, `Invalid transaction type. Allowed: ${[...ALLOWED_TYPES].join(", ")}`);
+        }
+        filter.type = upperType;
     }
 
     if (startDate || endDate) {
         filter.createdAt = {};
-        if (startDate) filter.createdAt.$gte = new Date(startDate);
-        if (endDate) filter.createdAt.$lte = new Date(endDate);
+        if (startDate) {
+            const d = new Date(startDate);
+            if (isNaN(d)) throw new ApiError(400, "Invalid startDate");
+            filter.createdAt.$gte = d;
+        }
+        if (endDate) {
+            const d = new Date(endDate);
+            if (isNaN(d)) throw new ApiError(400, "Invalid endDate");
+            filter.createdAt.$lte = d;
+        }
     }
 
     const [transactions, total] = await Promise.all([
@@ -566,6 +669,10 @@ export const getTransactionHistory = asyncHandler(async (req, res) => {
             .select("-metadata"),
         Transaction.countDocuments(filter)
     ]);
+    await redis
+        .set(cacheKey, JSON.stringify({ body: responseBody }), "EX", Number(process.env.CACHE_TTL_SECONDS))
+        .catch((e) => console.error("[getTransactionHistory] Redis SET failed:", e.message));
+
 
     return new ApiResponse(200, "Transaction history", {
         transactions,
@@ -581,6 +688,15 @@ export const getTransactionHistory = asyncHandler(async (req, res) => {
 
 export const getTransactionById = asyncHandler(async (req, res) => {
     const { transactionId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(transactionId)) {
+        throw new ApiError(400, "Invalid transaction ID");
+    }
+    const cacheKey = `txn:id:${transactionId}:u:${req.user.id}`;
+    const cached = await checkRedisCache(cacheKey, "getTransactionById");
+    if (cached) {
+        return res.set("X-Cache", "HIT").status(200).json(cached.body);
+    }
+
     const transaction = await Transaction.findById(transactionId)
         .populate("senderAccount", "accountNumber currency")
         .populate("receiverAccount", "accountNumber currency")
@@ -588,11 +704,20 @@ export const getTransactionById = asyncHandler(async (req, res) => {
 
     if (!transaction) throw new ApiError(404, "Transaction not found");
 
-    const account = await Account.findOne({
-        _id: { $in: [transaction.senderAccount?._id, transaction.receiverAccount?._id] },
-        userId: req.user.id
-    });
-    if (!account) throw new ApiError(403, "Unauthorized to view this transaction");
+    const userId = req.user.id;
+    const ownsSender = transaction.senderAccount?.userId?.toString() === userId;
+    const ownsReceiver = transaction.receiverAccount?.userId?.toString() === userId;
+
+    if (!ownsSender && !ownsReceiver) {
+        throw new ApiError(403, "Unauthorized to view this transaction");
+    }
+    if (transaction.senderAccount) delete transaction.senderAccount.userId;
+    if (transaction.receiverAccount) delete transaction.receiverAccount.userId;
+
+    const responseBody = { transaction };
+    await redis
+        .set(cacheKey, JSON.stringify({ body: responseBody }), "EX", Number(process.env.CACHE_TTL_SECONDS))
+        .catch((e) => console.error("[getTransactionById] Redis SET failed:", e.message));
 
     return new ApiResponse(200, "Transaction found", { transaction }).send(res);
 
@@ -602,11 +727,19 @@ export const getTransactionById = asyncHandler(async (req, res) => {
 
 export const getLedgerHistory = asyncHandler(async (req, res) => {
     const { accountId } = req.params;
-    const { page = 1, limit = 10 } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
 
     const account = await Account.findById(accountId);
     if (!account) throw new ApiError(404, "Account not found");
     if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to view ledger for this account");
+
+    const cacheKey = `ledger:history:${accountId}:p${page}:l${limit}`;
+    const cached = await checkRedisCache(cacheKey, "getLedgerHistory");
+
+    if (cached) {
+        return res.set("X-Cache", "HIT").status(200).json(cached.body);
+    }
 
     const filter = { accountId };
 
@@ -617,6 +750,10 @@ export const getLedgerHistory = asyncHandler(async (req, res) => {
             .limit(Number(limit)),
         LedgerEntry.countDocuments(filter)
     ]);
+
+    await redis
+        .set(cacheKey, JSON.stringify({ body: { entries, pagination: { total, page, totalPages: Math.ceil(total / limit), limit } } }), "EX", Number(process.env.CACHE_TTL_SECONDS))
+        .catch((e) => console.error("[getLedgerHistory] Redis SET failed:", e.message));
 
     return new ApiResponse(200, "Ledger history", {
         entries,
@@ -634,7 +771,16 @@ export const verifyBalance = asyncHandler(async (req, res) => {
     const account = await Account.findById(accountId);
     if (!account) throw new ApiError(404, "Account not found");
     if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to verify balance for this account");
-    const entries = await LedgerEntry.find({ accountId }).sort({ createdAt: 1 });
+
+    const TYPE_SIGN = {
+        CREDIT: +1,
+        DEPOSIT: +1,
+        DEBIT: -1,
+    };
+
+
+    const entries = await LedgerEntry.find({ accountId }).sort({ createdAt: 1 }).select("type amount balanceBefore balanceAfter")
+        .lean();;
 
     let reconstructed = 0;
     for (const entry of entries) {
@@ -648,6 +794,6 @@ export const verifyBalance = asyncHandler(async (req, res) => {
     return new ApiResponse(200, "Balance verification", {
         currentBalance: account.balance,
         reconstructedBalance: reconstructed,
-        isConsistent,         // false = something is wrong, alert your team
+        isConsistent,
     }).send(res);
 });

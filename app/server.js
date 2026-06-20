@@ -9,6 +9,8 @@ const NUM_WORKERS = Number(process.env.WEB_CONCURRENCY) || availableParallelism(
 if (cluster.isPrimary) {
     console.log(`Primary ${process.pid} started — forking ${NUM_WORKERS} workers`);
 
+
+
     for (let i = 0; i < NUM_WORKERS; i++) {
         cluster.fork();
     }
@@ -26,6 +28,6 @@ if (cluster.isPrimary) {
 
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
-        console.log(`Worker ${process.pid} listening on port ${PORT}`);
+        console.log(`Worker ${process.pid} listening on port : ${PORT} In ${process.env.NODE_ENV} mode`);
     });
 }
