@@ -12,7 +12,7 @@ const otpSchema = new mongoose.Schema({
 
     purpose: {
         type: String,
-        enum: ["add_beneficiary", "login", "reset_password", "high_value_transfer"],
+        enum: ["add_beneficiary", "login", "reset_password", "high_value_transfer", "account-reactivation"],
         required: true,
     },
 

@@ -15,9 +15,7 @@ export const createAccount = asyncHandler(async (req, res) => {
     if (!user.isVerified) throw new ApiError(403, "Please verify your email first");
     if (!user.isActive) throw new ApiError(403, "Account is suspended");
 
-
-
-    const { accountType = "savings" } = req.body;
+    const { accountType = "savings" } = req.body || {};
     if (!VALID_ACCOUNT_TYPES.includes(accountType)) {
         throw new ApiError(400, `Invalid account type. Must be one of: ${VALID_ACCOUNT_TYPES.join(", ")}`);
     }
@@ -29,7 +27,7 @@ export const createAccount = asyncHandler(async (req, res) => {
     }
     const duplicate = await accountModel.findOne({ idempotencyKey });
     if (duplicate) {
-        throw new ApiError(400, "Account already exists", {
+        throw new ApiError(400, "Account with this idempotency key already exists", {
             account: duplicate
         });
     }
@@ -50,6 +48,7 @@ export const createAccount = asyncHandler(async (req, res) => {
             if (hasSavings) throw new ApiError(400, "You already have a savings account");
         }
 
+
         const [account] = await accountModel.create(
             [{ userId: req.user.id, accountNumber: generateAccountNumber(), accountType, idempotencyKey }],
             { session }
@@ -57,7 +56,6 @@ export const createAccount = asyncHandler(async (req, res) => {
         return account;
 
     })
-
     await emailQueue.add("Accounts", { email: user.email }, {
         attempts: 3,
         backoff: { type: "exponential", delay: 2000 }

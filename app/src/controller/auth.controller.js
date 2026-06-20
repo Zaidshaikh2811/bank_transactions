@@ -7,6 +7,8 @@ import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import cookie from "cookie";
 import { emailQueue } from "../queues/emailQueue.js";
+import { sendOtp } from "../utils/opt.utils.js";
+import Otp from "../models/otp.model.js";
 
 /**
  * - User Register Controller
@@ -58,6 +60,14 @@ export const login = asyncHandler(async (req, res) => {
     }
 
     const user = await User.findOne({ email }).select("+password");
+
+
+    if (user.isActive === false) {
+        throw new ApiError(403, "Account is deactivated. Please contact support.");
+    }
+
+
+
     if (!user || !(await user.comparePassword(password))) {
         throw new ApiError(401, "Invalid credentials");
     }
@@ -103,7 +113,6 @@ export const login = asyncHandler(async (req, res) => {
 export const refreshToken = asyncHandler(async (req, res) => {
 
     const cookies = cookie.parse(req.headers.cookie || "");
-    console.log("Received Refresh Token Cookie:", cookies.refreshToken);
 
     const refreshToken = cookies.refreshToken;;
     if (!refreshToken) {
@@ -216,7 +225,7 @@ export const logout = asyncHandler(async (req, res) => {
  */
 
 
-export const reactivateUser = asyncHandler(async (req, res) => {
+export const requestReactivationOtp = asyncHandler(async (req, res) => {
     const { email } = req.body;
     if (!email) {
         throw new ApiError(400, "Email is required");
@@ -226,21 +235,84 @@ export const reactivateUser = asyncHandler(async (req, res) => {
         throw new ApiError(404, "User not found");
     }
 
-    if (user.isVerified) {
-        throw new ApiError(400, "User is already verified");
+    if (user.isActive === "active") {
+        throw new ApiError(400, "User is already active");
     }
-    user.isVerified = true;
+
+
+    const otp = await sendOtp({
+        userId: user._id,
+        purpose: "account-reactivation",
+        meta: { email: user.email },
+    });
+
     user.isActive = true;
     user.deactivatedAt = null;
     user.deactivatedReason = null;
     await user.save();
-
     await emailQueue.add("account-reactivated", {
         email: user.email
     }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
-    return new ApiResponse(200, "User activated successfully").send(res);
+
+    return new ApiResponse(200, "OTP sent successfully").send(res);
 });
 
+
+
+export const verifyReactivationOtp = asyncHandler(async (req, res) => {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+        throw new ApiError(400, "Email and OTP are required");
+    }
+
+    const user = await User.findOne({
+        email: email.toLowerCase(),
+    });
+
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+
+    if (user.isActive === "active") {
+        throw new ApiError(400, "Account is already active");
+    }
+
+    const otpRecord = await Otp.findOne({
+        userId: user._id,
+        purpose: "account-reactivation",
+        maskedContact: otp.maskedContact,
+    });
+
+    if (!otpRecord || otpRecord.otp !== otp) {
+        throw new ApiError(400, "Invalid OTP");
+    }
+
+    if (user.otpExpiry < Date.now()) {
+        throw new ApiError(400, "OTP expired");
+    }
+
+    user.isActive = "active";
+    user.deactivatedAt = null;
+    user.deactivationReason = null;
+
+    user.otp = undefined;
+    user.otpExpiry = undefined;
+
+    await user.save();
+
+    await emailQueue.add("account-reactivated", {
+        email: user.email,
+    });
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {},
+            "Account reactivated successfully"
+        )
+    );
+});
 
 
 /**
@@ -252,8 +324,12 @@ export const reactivateUser = asyncHandler(async (req, res) => {
  * - Sets isActive to false, preventing the user from logging in or performing any actions until reactivated
  */
 export const deactivateUser = asyncHandler(async (req, res) => {
-    const { userId } = req.params;
-    const { reason } = req.body;
+    const userId = req.user.id;
+    const { reason } = req.body || { reason: "No reason provided" };
+
+    if (!userId) {
+        throw new ApiError(400, "User ID is required");
+    }
 
     const user = await User.findById(userId);
     if (!user) {
@@ -271,7 +347,7 @@ export const deactivateUser = asyncHandler(async (req, res) => {
     user.deactivatedReason = reason.trim() || "No reason provided";
     await user.save();
     await emailQueue.add("account-deactivated", {
-        email: user.email, reason
+        email: user.email, reason: reason.trim() || "No reason provided"
     }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
     return new ApiResponse(200, "User deactivated successfully").send(res);
 });
@@ -279,14 +355,13 @@ export const deactivateUser = asyncHandler(async (req, res) => {
 
 
 export const activateUser = asyncHandler(async (req, res) => {
-    const { token } = req.params;
-    console.log("Verification Token:", token);
-    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-    const userId = decoded.id;
-    const user = await User.findOne({ _id: userId });
+    const userId = req.user.id;
+
+    const user = await User.findById(userId).select("+password");
     if (!user) {
         throw new ApiError(404, "Invalid verification token");
     }
+
     if (user.isVerified) {
         throw new ApiError(400, "User is already verified");
     }
