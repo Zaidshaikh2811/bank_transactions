@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import authRoutes from "./routes/auth.route.js";
-import userRoutes from "./routes/accounts.route.js";
+import accountRoute from "./routes/accounts.route.js";
 import transactionRoutes from "./routes/transaction.route.js";
 import beneficiaryRoutes from "./routes/beneficiary.route.js";
 import adminRoutes from "./routes/admin.route.js";
@@ -82,7 +82,7 @@ app.use("/admin/queues", authLimiter, bullMq);
 
 app.use("/api/admin", authLimiter, adminRoutes);
 app.use("/api/auth", authLimiter, authRoutes);
-app.use("/api/account", generalLimiter, userRoutes);
+app.use("/api/account", generalLimiter, accountRoute);
 app.use("/api/transaction", transferLimiter, transactionRoutes);
 app.use("/api/beneficiary", transferLimiter, beneficiaryRoutes);
 

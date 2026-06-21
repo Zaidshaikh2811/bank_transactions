@@ -2,7 +2,7 @@ import asyncHandler from "../utils/asyncHandler.js";
 import Account from "../models/account.model.js";
 import Transaction from "../models/transaction.model.js";
 import ApiError from "../utils/ApiError.js";
-import { acquireRedisLock, checkRedisCache, parseAndValidateIdempotency, releaseLock, validateAmount } from "../utils/transaction.utils.js";
+import { acquireRedisLock, checkRedisCache, fromCents, parseAndValidateIdempotency, releaseLock, toCents, validateAmount } from "../utils/transaction.utils.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { emailQueue } from "../queues/emailQueue.js";
@@ -17,12 +17,14 @@ import crypto from "crypto";
 
 export const deposit = asyncHandler(async (req, res) => {
     const { accountId } = req.params;
-    const { description } = req.body;
-    const idempotencyKey = req.headers["x-idempotency-key"];
-    const amountCents = toCents(req.body.rawAmount);
-    if (!Number.isInteger(amountCents) || amountCents <= 0) {
-        throw new ApiError(400, "Invalid amount");
-    }
+    const { description, amount } = req.body;
+
+    const { amountCents, idempotencyKey } = parseAndValidateIdempotency(
+        amount,
+        req.headers["x-idempotency-key"],
+        "MAX_TRANSFER_AMOUNT",
+        Number(process.env.MAX_TRANSFER_AMOUNT),
+    );
 
     if (!amountCents) {
         throw new ApiError(400, "Amount is required");
@@ -30,60 +32,33 @@ export const deposit = asyncHandler(async (req, res) => {
     if (!accountId) {
         throw new ApiError(400, "Account ID is required");
     }
-    if (!idempotencyKey) {
-        throw new ApiError(400, "Idempotency key is required");
-    }
-    if (!UUID_RE.test(idempotencyKey)) {
-        throw new ApiError(400, "X-Idempotency-Key must be a valid UUID v4");
-    }
-
-    const maxCents = toCents(process.env.MAX_TRANSFER_AMOUNT || 500_000);
-
-    validateAmount(amountCents, maxCents);
-
     const duplicate = await Transaction.findOne({ idempotencyKey });
     if (duplicate) {
-        return res.status(200).json({ message: "Transaction already processed", transactionId: duplicate._id });
+        return new ApiResponse(200, "Transaction already processed", { transactionId: duplicate._id }).send(res);
     }
 
     const user = await User.findById(req.user.id).select("email");
     if (!user) throw new ApiError(404, "User not found");
 
     const userId = req.user.id;
-    const lockToken = crypto.randomUUID();
     const lockKey = `idempotency:lock:${userId}:${idempotencyKey}`;
     const cacheKey = `idempotency:done:${userId}:${idempotencyKey}`;
 
-    let cache = null;
-    try {
-        cache = await redis.get(cacheKey);
-    }
-    catch (err) {
-        console.error("[deposit] Redis GET failed, falling through to DB:", err.message);
+    let cached = await checkRedisCache(cacheKey, "Deposit");
+    console.log("cached", cached)
+    if (cached) {
+        return new ApiResponse(cached.statusCode, "Already processed", cached.body).send(res);
     }
 
-    if (cache) {
-        const { statusCode, body } = JSON.parse(cache);
-        return res
-            .status(statusCode)
-            .set("X-Idempotent-Replayed", "true")
-            .json(body);
-    }
-    let lockAcquired = false;
-    try {
-        const result = await redis.set(lockKey, lockToken, "NX", "PX", 30000);
-        lockAcquired = result === "OK";
-    }
-    catch (err) {
-        console.error("[deposit] Redis lock unavailable:", err.message);
-        throw new ApiError(503, "Deposit service temporarily unavailable. Please try again shortly.");
-    }
+    const { lockAcquired, lockToken } = await acquireRedisLock(lockKey, "Deposit");
     if (!lockAcquired) {
         return res.status(409).json({
-            success: false, message: "A deposit with this idempotency key is already being processed. Please wait and retry.",
-            retryAfterMs: 30000,
+            success: false,
+            message: "A deposit with this idempotency key is already being processed. Please wait and retry.",
+            retryAfterMs: Number(process.env.LOCK_TTL_MS),
         });
     }
+
 
     try {
         const dbRecord = await Idempotency.findOne({
@@ -98,18 +73,16 @@ export const deposit = asyncHandler(async (req, res) => {
                 JSON.stringify({ statusCode: dbRecord.statusCode, body: dbRecord.responseBody }),
                 "EX", Number(process.env.CACHE_TTL_SECONDS)
             );
-            return res
-                .status(dbRecord.statusCode)
-                .set("X-Idempotent-Replayed", "true")
-                .json(dbRecord.responseBody);
+            return new ApiResponse(dbRecord.statusCode, "Already processed", dbRecord.responseBody).send(res);
         }
 
 
 
         const transaction = await withTransaction(async (session) => {
-            const account = await Account.findById(accountId).session(session);
+            const account = await Account.findOne({ accountNumber: accountId }).session(session);
+            console.log(`[deposit] Fetched account ${accountId} for user ${userId}:`, account);
             if (!account) {
-                throw new ApiError(404, "Account not found");
+                throw new ApiError(404, "Account not found ");
             }
 
             if (account.userId.toString() !== req.user.id) {
@@ -122,6 +95,7 @@ export const deposit = asyncHandler(async (req, res) => {
 
             account.balance = parseFloat((account.balance + fromCents(amountCents)).toFixed(2));
             await account.save({ session });
+            console.log(`[deposit] Updated balance for account ${accountId}:`, account.balance);
             const transaction = new Transaction({
                 receiverAccount: account._id,
                 type: TRANSACTION_TYPES.DEPOSIT,
@@ -137,21 +111,36 @@ export const deposit = asyncHandler(async (req, res) => {
                 processedAt: new Date(),
             });
 
-            await ledger.create({
+            await LedgerEntry.create([{
                 transactionId: transaction._id,
                 accountId: account._id,
-                type: "DEPOSIT",
+                type: "CREDIT",
                 amount: amountCents,
-                balanceBefore: account.balance - amountCents,
-                balanceAfter: account.balance,
+                balanceBeforeCents: account.balance - amountCents,
+                balanceAfterCents: account.balance,
                 currency: account.currency,
                 description: description || "Deposit into account",
-            }, { session });
+            }], { session });
 
             await transaction.save({ session });
 
+
+            await Idempotency.create([{
+                userId,
+                key: idempotencyKey,
+                purpose: "deposit",
+                statusCode: 200,
+                responseBody: { success: true, message: "Deposit successful", transaction },
+            }], { session });
+
             return transaction;
         });
+
+        await redis.set(
+            cacheKey,
+            JSON.stringify({ statusCode: 200, body: { success: true, message: "Deposit successful", transaction } }),
+            "EX", Number(process.env.CACHE_TTL_SECONDS)
+        ).catch((e) => console.error("[deposit] Failed to set Redis cache:", e.message));
 
 
         await emailQueue.add("deposit", {
@@ -162,8 +151,11 @@ export const deposit = asyncHandler(async (req, res) => {
 
         return new ApiResponse(201, "Deposit successful", { transaction }).send(res);
     } catch (err) {
-        await redis.del(lockKey).catch((e) => console.error("[deposit] Failed to release lock after DB error:", e.message));
-        console.error("[deposit] Redis GET failed during idempotency check, falling through to DB:", err.message);
+        console.error("[deposit] Error processing deposit:", err);
+        throw new ApiError(500, err.message || "Internal server error");
+    }
+    finally {
+        await releaseLock(lockKey, lockToken, "Deposit");
     }
 });
 
@@ -180,34 +172,20 @@ export const transfer = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Cannot transfer to the same account");
     }
 
-    const amountCents = toCents(rawAmount);
-    if (!Number.isInteger(amountCents) || amountCents <= 0) {
-        throw new ApiError(400, "Invalid amount");
-    }
+    const { amountCents, idempotencyKey } = parseAndValidateIdempotency(
+        rawAmount,
+        req.headers["x-idempotency-key"],
+        "MAX_TRANSFER_AMOUNT",
+        Number(process.env.MAX_TRANSFER_AMOUNT),
+    );
 
-    const maxCents = toCents(process.env.MAX_TRANSFER_AMOUNT || 500_000);
-    validateAmount(amountCents, maxCents);
 
-
-    const idempotencyKey = req.headers["x-idempotency-key"];
-    if (!idempotencyKey) {
-        throw new ApiError(400, "Idempotency key is required");
-    }
-    if (!UUID_RE.test(idempotencyKey)) {
-        throw new ApiError(400, "X-Idempotency-Key must be a valid UUID v4");
-    }
 
     const userId = req.user.id;
-    const lockToken = crypto.randomUUID();
     const lockKey = `idempotency:lock:${userId}:${idempotencyKey}`;
     const cacheKey = `idempotency:done:${userId}:${idempotencyKey}`;
 
-    let cached = null;
-    try {
-        cached = await redis.get(cacheKey);
-    } catch (err) {
-        console.error("[transfer] Redis GET failed, falling through to DB:", err.message);
-    }
+    let cached = await checkRedisCache(cacheKey, "transfer");
 
     if (cached) {
         const { statusCode, body } = JSON.parse(cached);
@@ -217,23 +195,14 @@ export const transfer = asyncHandler(async (req, res) => {
             .json(body);
     }
 
-    let lockAcquired = false;
-    try {
-        const result = await redis.set(lockKey, lockToken, "NX", "PX", LOCK_TTL_MS);
-        lockAcquired = result === "OK";
-    } catch (err) {
-        console.error("[transfer] Redis lock unavailable:", err.message);
-        throw new ApiError(503, "Transfer service temporarily unavailable. Please try again shortly.");
-    }
-
+    const { lockAcquired, lockToken } = await acquireRedisLock(lockKey, "Transfer");
     if (!lockAcquired) {
         return res.status(409).json({
             success: false,
             message: "A transfer with this idempotency key is already being processed. Please wait and retry.",
-            retryAfterMs: LOCK_TTL_MS,
+            retryAfterMs: Number(process.env.LOCK_TTL_MS),
         });
     }
-
 
 
     try {
@@ -257,6 +226,7 @@ export const transfer = asyncHandler(async (req, res) => {
 
 
 
+        console.log(req.user.id, "initiating transfer of", fromCents(amountCents), "from", senderAccountId, "to", receiverAccountId);
 
         const senderUser = await User.findById(req.user.id).select("email isActive isVerified");
         if (!senderUser) {
@@ -273,19 +243,14 @@ export const transfer = asyncHandler(async (req, res) => {
 
 
         const transaction = await withTransaction(async (session) => {
-            const senderAccount = await Account.findOne({ userId: senderAccountId }).session(session);
-            const receiverAccount = await Account.findOne({ userId: receiverAccountId }).session(session);
+            const senderAccount = await Account.findOne({ accountNumber: senderAccountId, isActive: "active" }).session(session);
+            const receiverAccount = await Account.findOne({ accountNumber: receiverAccountId, isActive: "active" }).session(session);
 
-
+            console.log("Sender account:", senderAccount);
 
             if (!senderAccount) throw new ApiError(404, "Sender account not found");
             if (!receiverAccount) throw new ApiError(404, "Receiver account not found");
             if (senderAccount.userId.toString() !== req.user.id) throw new ApiError(403, "You do not own the sender account");
-
-
-            if (senderAccount.isActive !== "active") throw new ApiError(403, "Sender account is inactive");
-            if (receiverAccount.isActive !== "active") throw new ApiError(403, "Receiver account is inactive");
-
 
             if (senderAccount.currency !== receiverAccount.currency) {
                 throw new ApiError(400,
@@ -299,7 +264,7 @@ export const transfer = asyncHandler(async (req, res) => {
             const todayTotal = await Transaction.aggregate([
                 {
                     $match: {
-                        senderAccount: new mongoose.Types.ObjectId(senderAccountId),
+                        senderAccount: senderAccountId,
                         type: TRANSACTION_TYPES.TRANSFER,
                         status: "completed",
                         createdAt: { $gte: startDate }
@@ -405,7 +370,7 @@ export const transfer = asyncHandler(async (req, res) => {
                 [{
                     userId,
                     key: idempotencyKey,
-                    purpose: "beneficiary_transfer",
+                    purpose: "transfer",
                     statusCode: 200,
                     responseBody,
                 }],
@@ -452,8 +417,7 @@ export const transfer = asyncHandler(async (req, res) => {
         });
         return new ApiResponse(201, "Transfer successful", transaction.responseBody).send(res);
     } finally {
-        await redis.eval(LOCK_RELEASE_SCRIPT, 1, lockKey, lockToken)
-            .catch((err) => console.error("[transfer] Lock release failed:", err.message));
+        await releaseLock(lockKey, lockToken, "transfer");
     }
 })
 
@@ -490,7 +454,7 @@ export const withdraw = asyncHandler(async (req, res) => {
         return res.status(409).json({
             success: false,
             message: "A withdrawal with this idempotency key is already being processed. Please wait and retry.",
-            retryAfterMs: LOCK_TTL_MS,
+            retryAfterMs: Number(process.env.LOCK_TTL_MS),
         });
     }
 

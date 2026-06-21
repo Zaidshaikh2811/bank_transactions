@@ -39,6 +39,8 @@ services:
      container_name: node-app
      ports:
        - "3000:3000"
+     env-file:
+       - .env  
      environment:
        - REDIS_HOST=redis
        - REDIS_PORT=6379

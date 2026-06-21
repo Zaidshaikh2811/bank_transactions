@@ -20,7 +20,6 @@ export const createAccount = asyncHandler(async (req, res) => {
         throw new ApiError(400, `Invalid account type. Must be one of: ${VALID_ACCOUNT_TYPES.join(", ")}`);
     }
 
-
     const idempotencyKey = req.headers["x-idempotency-key"];
     if (!idempotencyKey) {
         throw new ApiError(400, "Idempotency key is required");
@@ -56,7 +55,7 @@ export const createAccount = asyncHandler(async (req, res) => {
         return account;
 
     })
-    await emailQueue.add("Accounts", { email: user.email }, {
+    await emailQueue.add("welcome", { email: user.email }, {
         attempts: 3,
         backoff: { type: "exponential", delay: 2000 }
     });

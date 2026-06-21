@@ -1,5 +1,6 @@
 
 import ApiError from "./ApiError.js";
+import redis from "../config/redis.js";
 
 export const toCents = (v) => Math.round(Number(v) * 100);
 export const fromCents = (v) => +(v / 100).toFixed(2);
