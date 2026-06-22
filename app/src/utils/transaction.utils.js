@@ -46,7 +46,6 @@ export const LOCK_RELEASE_SCRIPT = `
  */
 export function parseAndValidateIdempotency(rawAmount, idempotencyKeyHeader, maxEnvKey, defaultMaxCents) {
     const amountCents = toCents(rawAmount);
-
     // Check integer FIRST — toCents may return NaN / float on bad input
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
         throw new ApiError(400, "Invalid amount — must be a positive number with at most 2 decimal places");

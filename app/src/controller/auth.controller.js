@@ -61,12 +61,13 @@ export const login = asyncHandler(async (req, res) => {
 
     const user = await User.findOne({ email }).select("+password");
 
+    if (!user) {
+        throw new ApiError(401, "Invalid credentials");
+    }
 
     if (user.isActive === false) {
         throw new ApiError(403, "Account is deactivated. Please contact support.");
     }
-
-
 
     if (!user || !(await user.comparePassword(password))) {
         throw new ApiError(401, "Invalid credentials");
@@ -355,7 +356,13 @@ export const deactivateUser = asyncHandler(async (req, res) => {
 
 
 export const activateUser = asyncHandler(async (req, res) => {
-    const userId = req.user.id;
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+    const userId = decoded.id;
 
     const user = await User.findById(userId).select("+password");
     if (!user) {

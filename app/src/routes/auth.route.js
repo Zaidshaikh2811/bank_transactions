@@ -16,7 +16,7 @@ router.post("/logout", authMiddleware, logout);
 router.post("/logout-all", authMiddleware, logoutAllSessions);
 router.post("/reactivate/verify-otp", verifyReactivationOtp);
 router.post("/reactivate/request", requestReactivationOtp);
-router.patch("/verify/:token", activateUser);
+router.patch("/verify", activateUser);
 router.patch("/users/:userId/deactivate", authMiddleware, deactivateUser);
 router.patch("/deactivate-my-account", authMiddleware, deactivateOwnAccount);
 

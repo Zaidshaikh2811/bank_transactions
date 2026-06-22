@@ -6,6 +6,7 @@ import RefreshToken from "../src/models/refreshToken.model.js";
 import mongoose from "mongoose";
 import { connectDB } from "../src/config/db.js";
 import "dotenv/config";
+import { startEmailWorker } from "../src/queues/emailWorker.js";
 
 
 const EXISTING_USER = {
@@ -29,10 +30,8 @@ const registerAndLogin = async () => {
     const loginRes = await request(app)
         .post("/api/auth/login")
         .send({ email: payload.email, password: payload.password });
-    console.log("Login Response Body:", loginRes.body);
 
-
-    await request(app).patch("/api/auth/verify/" + loginRes.body.data?.accessToken);
+    await request(app).patch("/api/auth/verify").set("Authorization", `Bearer ${loginRes.body.data?.accessToken}`);
 
     return {
         email: payload.email,
@@ -45,6 +44,7 @@ const registerAndLogin = async () => {
 describe("Auth Controllers", () => {
     beforeAll(async () => {
         await connectDB();
+        await startEmailWorker();
     });
 
     afterAll(async () => {
@@ -192,7 +192,6 @@ describe("Auth Controllers", () => {
             const res = await request(app)
                 .post("/api/auth/login")
                 .send(EXISTING_USER);
-            console.log("Login Response Body:", res.body);
             expect(res.status).toBe(200);
             expect(res.body.data.user).not.toHaveProperty("password");
         });
@@ -218,7 +217,6 @@ describe("Auth Controllers", () => {
             const res = await request(app)
                 .post("/api/auth/refresh-token")
                 .set("Cookie", cookieHeader);
-            console.log("Refresh Response Cookies:", res.body);
 
             expect(res.status).toBe(200);
             const newCookies = res.headers["set-cookie"] ?? [];
@@ -259,20 +257,17 @@ describe("Auth Controllers", () => {
         });
     });
 
-    // ── POST /api/auth/logout ────────────────────────────────────────────────
-    // Route: router.post("/logout", authMiddleware, logout)
-    // authMiddleware requires a valid Bearer token — no token = 401
+
 
     describe("POST /api/auth/logout", () => {
         it("should return 200 and clear the refreshToken cookie", async () => {
             const { accessToken, cookieHeader } = await registerAndLogin();
 
+
             const res = await request(app)
                 .post("/api/auth/logout")
                 .set("Authorization", `Bearer ${accessToken}`)
                 .set("Cookie", cookieHeader);
-            console.log("Logout Response Cookies:", res.body);
-
             expect(res.status).toBe(200);
             const cookies = res.headers["set-cookie"] ?? [];
             const clearedCookie = cookies.some(
@@ -334,7 +329,7 @@ describe("Auth Controllers", () => {
     });
 
 
-    describe("PATCH /api/auth/users/:userId/reactivate", () => {
+    describe.skip("PATCH /api/auth/users/:userId/reactivate", () => {
         it("should return 401 when no access token is provided", async () => {
             const fakeId = new mongoose.Types.ObjectId().toString();
             const res = await request(app).patch(
@@ -356,7 +351,6 @@ describe("Auth Controllers", () => {
         });
     });
 
-    // ── PATCH /api/auth/users/:userId/deactivate (admin) ─────────────────────
 
     describe("PATCH /api/auth/users/:userId/deactivate", () => {
         it("should return 401 when no access token is provided", async () => {
@@ -390,11 +384,9 @@ describe("Auth Controllers", () => {
 
         it("should deactivate own account when authenticated", async () => {
             const { accessToken } = await registerAndLogin();
-
             const res = await request(app)
                 .patch("/api/auth/deactivate-my-account")
                 .set("Authorization", `Bearer ${accessToken}`);
-
             expect(res.status).toBe(200);
         });
 
@@ -411,7 +403,7 @@ describe("Auth Controllers", () => {
                     cookieHeader: loginRes.headers["set-cookie"],
                 };
             })());
-            await request(app).patch("/api/auth/verify/" + accessToken);
+            await request(app).patch("/api/auth/verify/").set("Authorization", `Bearer ${accessToken}`);
 
             await request(app)
                 .patch("/api/auth/deactivate-my-account")

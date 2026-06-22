@@ -16,7 +16,7 @@ import crypto from "crypto";
 
 
 export const deposit = asyncHandler(async (req, res) => {
-    const { accountId } = req.params;
+    const { accountNumber } = req.params;
     const { description, amount } = req.body;
 
     const { amountCents, idempotencyKey } = parseAndValidateIdempotency(
@@ -29,15 +29,12 @@ export const deposit = asyncHandler(async (req, res) => {
     if (!amountCents) {
         throw new ApiError(400, "Amount is required");
     }
-    if (!accountId) {
-        throw new ApiError(400, "Account ID is required");
-    }
-    const duplicate = await Transaction.findOne({ idempotencyKey });
-    if (duplicate) {
-        return new ApiResponse(200, "Transaction already processed", { transactionId: duplicate._id }).send(res);
+    if (!accountNumber) {
+        throw new ApiError(400, "Account Number is required");
     }
 
     const user = await User.findById(req.user.id).select("email");
+    console.log("[deposit] User found:", user);
     if (!user) throw new ApiError(404, "User not found");
 
     const userId = req.user.id;
@@ -45,7 +42,6 @@ export const deposit = asyncHandler(async (req, res) => {
     const cacheKey = `idempotency:done:${userId}:${idempotencyKey}`;
 
     let cached = await checkRedisCache(cacheKey, "Deposit");
-    console.log("cached", cached)
     if (cached) {
         return new ApiResponse(cached.statusCode, "Already processed", cached.body).send(res);
     }
@@ -59,6 +55,7 @@ export const deposit = asyncHandler(async (req, res) => {
         });
     }
 
+    console.log("[deposit] Lock acquired for user:", userId, "key:", idempotencyKey);
 
     try {
         const dbRecord = await Idempotency.findOne({
@@ -66,6 +63,9 @@ export const deposit = asyncHandler(async (req, res) => {
             key: idempotencyKey,
             purpose: "deposit",
         });
+
+        console.log("[deposit] Checking idempotency for user:", userId, "key:", idempotencyKey, "found record:", dbRecord);
+
 
         if (dbRecord) {
             await redis.set(
@@ -78,9 +78,8 @@ export const deposit = asyncHandler(async (req, res) => {
 
 
 
-        const transaction = await withTransaction(async (session) => {
-            const account = await Account.findOne({ accountNumber: accountId }).session(session);
-            console.log(`[deposit] Fetched account ${accountId} for user ${userId}:`, account);
+        const { transaction, responseBody } = await withTransaction(async (session) => {
+            const account = await Account.findOne({ accountNumber: accountNumber }).session(session);
             if (!account) {
                 throw new ApiError(404, "Account not found ");
             }
@@ -89,17 +88,16 @@ export const deposit = asyncHandler(async (req, res) => {
                 throw new ApiError(403, "Unauthorized to deposit into this account");
             }
 
-            if (!account.isActive) {
+            if (account.isActive !== "active") {
                 throw new ApiError(403, "Account is not active");
             }
-
-            account.balance = parseFloat((account.balance + fromCents(amountCents)).toFixed(2));
+            const balanceBeforeCents = account.balance;
+            account.balance = account.balance + amountCents;
             await account.save({ session });
-            console.log(`[deposit] Updated balance for account ${accountId}:`, account.balance);
             const transaction = new Transaction({
                 receiverAccount: account._id,
                 type: TRANSACTION_TYPES.DEPOSIT,
-                amount: fromCents(amountCents),
+                amount: amountCents,
                 currency: account.currency,
                 description: description || TRANSACTION_TYPES.DEPOSIT,
                 idempotencyKey,
@@ -116,7 +114,7 @@ export const deposit = asyncHandler(async (req, res) => {
                 accountId: account._id,
                 type: "CREDIT",
                 amount: amountCents,
-                balanceBeforeCents: account.balance - amountCents,
+                balanceBeforeCents: balanceBeforeCents,
                 balanceAfterCents: account.balance,
                 currency: account.currency,
                 description: description || "Deposit into account",
@@ -133,12 +131,17 @@ export const deposit = asyncHandler(async (req, res) => {
                 responseBody: { success: true, message: "Deposit successful", transaction },
             }], { session });
 
-            return transaction;
+            const responseBody = {
+                transactionId: transaction._id,
+                amount: fromCents(amountCents),
+                balanceAfter: fromCents(account.balance),
+            };
+            return { transaction, responseBody };
         });
 
         await redis.set(
             cacheKey,
-            JSON.stringify({ statusCode: 200, body: { success: true, message: "Deposit successful", transaction } }),
+            JSON.stringify({ statusCode: 200, body: { responseBody } }),
             "EX", Number(process.env.CACHE_TTL_SECONDS)
         ).catch((e) => console.error("[deposit] Failed to set Redis cache:", e.message));
 
@@ -149,7 +152,7 @@ export const deposit = asyncHandler(async (req, res) => {
             balance: transaction.balanceAfter
         }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
 
-        return new ApiResponse(201, "Deposit successful", { transaction }).send(res);
+        return new ApiResponse(201, "Deposit successful", { responseBody }).send(res);
     } catch (err) {
         console.error("[deposit] Error processing deposit:", err);
         throw new ApiError(500, err.message || "Internal server error");
@@ -161,14 +164,14 @@ export const deposit = asyncHandler(async (req, res) => {
 
 
 export const transfer = asyncHandler(async (req, res) => {
-    const { senderAccountId, receiverAccountId, amount: rawAmount, description, deviceId } = req.body;
+    const { senderAccountNumber, receiverAccountNumber, amount: rawAmount, description, deviceId } = req.body;
 
 
-    if (!senderAccountId || !receiverAccountId || !rawAmount) {
-        throw new ApiError(400, "Sender account ID, receiver account ID, and amount are required");
+    if (!senderAccountNumber || !receiverAccountNumber || !rawAmount) {
+        throw new ApiError(400, "Sender account number, receiver account number, and amount are required");
     }
 
-    if (senderAccountId === receiverAccountId) {
+    if (senderAccountNumber === receiverAccountNumber) {
         throw new ApiError(400, "Cannot transfer to the same account");
     }
 
@@ -186,22 +189,17 @@ export const transfer = asyncHandler(async (req, res) => {
     const cacheKey = `idempotency:done:${userId}:${idempotencyKey}`;
 
     let cached = await checkRedisCache(cacheKey, "transfer");
-
     if (cached) {
-        const { statusCode, body } = JSON.parse(cached);
-        return res
-            .status(statusCode)
-            .set("X-Idempotent-Replayed", "true")
-            .json(body);
+        const { statusCode, body } = cached;
+        return new ApiResponse(statusCode, "Already processed", body).send(res);
     }
 
     const { lockAcquired, lockToken } = await acquireRedisLock(lockKey, "Transfer");
     if (!lockAcquired) {
-        return res.status(409).json({
-            success: false,
-            message: "A transfer with this idempotency key is already being processed. Please wait and retry.",
+        return new ApiResponse(409, "A transfer with this idempotency key is already being processed. Please wait and retry.", {
             retryAfterMs: Number(process.env.LOCK_TTL_MS),
-        });
+        }).send(res);
+
     }
 
 
@@ -209,7 +207,7 @@ export const transfer = asyncHandler(async (req, res) => {
         const dbRecord = await Idempotency.findOne({
             userId,
             key: idempotencyKey,
-            purpose: "beneficiary_transfer",
+            purpose: "transfer",
         });
 
         if (dbRecord) {
@@ -218,15 +216,10 @@ export const transfer = asyncHandler(async (req, res) => {
                 JSON.stringify({ statusCode: dbRecord.statusCode, body: dbRecord.responseBody }),
                 "EX", Number(process.env.CACHE_TTL_SECONDS)
             );
-            return res
-                .status(dbRecord.statusCode)
-                .set("X-Idempotent-Replayed", "true")
-                .json(dbRecord.responseBody);
+            return new ApiResponse(dbRecord.statusCode, "Already processed", dbRecord.responseBody).send(res);
         }
 
 
-
-        console.log(req.user.id, "initiating transfer of", fromCents(amountCents), "from", senderAccountId, "to", receiverAccountId);
 
         const senderUser = await User.findById(req.user.id).select("email isActive isVerified");
         if (!senderUser) {
@@ -243,10 +236,9 @@ export const transfer = asyncHandler(async (req, res) => {
 
 
         const transaction = await withTransaction(async (session) => {
-            const senderAccount = await Account.findOne({ accountNumber: senderAccountId, isActive: "active" }).session(session);
-            const receiverAccount = await Account.findOne({ accountNumber: receiverAccountId, isActive: "active" }).session(session);
+            const senderAccount = await Account.findOne({ accountNumber: senderAccountNumber, isActive: "active" }).session(session);
+            const receiverAccount = await Account.findOne({ accountNumber: receiverAccountNumber, isActive: "active" }).session(session);
 
-            console.log("Sender account:", senderAccount);
 
             if (!senderAccount) throw new ApiError(404, "Sender account not found");
             if (!receiverAccount) throw new ApiError(404, "Receiver account not found");
@@ -264,7 +256,7 @@ export const transfer = asyncHandler(async (req, res) => {
             const todayTotal = await Transaction.aggregate([
                 {
                     $match: {
-                        senderAccount: senderAccountId,
+                        senderAccount: senderAccount._id,
                         type: TRANSACTION_TYPES.TRANSFER,
                         status: "completed",
                         createdAt: { $gte: startDate }
@@ -349,8 +341,8 @@ export const transfer = asyncHandler(async (req, res) => {
                     accountId: senderAccount._id,
                     type: "DEBIT",
                     amount: amountCents,
-                    balanceBefore: debitedSender.balance + amountCents,
-                    balanceAfter: debitedSender.balance,
+                    balanceBeforeCents: debitedSender.balance + amountCents,
+                    balanceAfterCents: debitedSender.balance,
                     currency: senderAccount.currency,
                     description: description || "Transfer to " + receiverAccount.accountNumber,
                 }),
@@ -359,8 +351,8 @@ export const transfer = asyncHandler(async (req, res) => {
                     accountId: receiverAccount._id,
                     type: "CREDIT",
                     amount: amountCents,
-                    balanceBefore: creditedReceiver.balance - amountCents,
-                    balanceAfter: creditedReceiver.balance,
+                    balanceBeforeCents: creditedReceiver.balance - amountCents,
+                    balanceAfterCents: creditedReceiver.balance,
                     currency: receiverAccount.currency,
                     description: description || "Transfer from " + senderAccount.accountNumber,
                 })
@@ -385,8 +377,6 @@ export const transfer = asyncHandler(async (req, res) => {
                 receiverUserId: receiverAccount.userId,
             };
         })
-
-
 
         await redis.set(
             cacheKey,
@@ -415,6 +405,7 @@ export const transfer = asyncHandler(async (req, res) => {
         ]).catch((err) => {
             console.error("[transfer] Failed to enqueue email notifications:", err.message);
         });
+        console.log("[transfer] Transfer successful:", transaction.responseBody);
         return new ApiResponse(201, "Transfer successful", transaction.responseBody).send(res);
     } finally {
         await releaseLock(lockKey, lockToken, "transfer");
@@ -423,7 +414,7 @@ export const transfer = asyncHandler(async (req, res) => {
 
 
 export const withdraw = asyncHandler(async (req, res) => {
-    const { accountId } = req.params;
+    const { accountNumber } = req.params;
     const amount = parseFloat(req.body.amount);
     const { description } = req.body;
     const { amountCents, idempotencyKey } = parseAndValidateIdempotency(
@@ -433,7 +424,7 @@ export const withdraw = asyncHandler(async (req, res) => {
         Number(process.env.MAX_WITHDRAW_AMOUNT),
     );
     if (!amount) throw new ApiError(400, "Amount is required");
-    if (!accountId) throw new ApiError(400, "Account ID is required");;
+    if (!accountNumber) throw new ApiError(400, "Account Number is required");;
 
 
     const userId = req.user.id;
@@ -463,10 +454,11 @@ export const withdraw = asyncHandler(async (req, res) => {
         const dbRecord = await Idempotency.findOne({
             userId,
             key: idempotencyKey,
-            purpose: "withdraw",
+            purpose: "withdrawal",
         });
 
         if (dbRecord) {
+            console.log("[withdraw] Idempotency record found for user:", userId, "key:", idempotencyKey, "record:", dbRecord);
             await redis.set(
                 cacheKey,
                 JSON.stringify({ statusCode: dbRecord.statusCode, body: dbRecord.responseBody }),
@@ -485,12 +477,12 @@ export const withdraw = asyncHandler(async (req, res) => {
 
         const user = await User.findById(req.user.id).select("email");
         if (!user) throw new ApiError(404, "User not found");
-        const { transaction: txn, responseBody } = await withTransaction(async (session) => {
-            const account = await Account.findById(accountId).session(session);
+        const { transaction, responseBody } = await withTransaction(async (session) => {
+            const account = await Account.findOne({ accountNumber: accountNumber }).session(session);
             if (!account) throw new ApiError(404, "Account not found");
             const balanceBefore = account.balance;
             if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to withdraw from this account");
-            if (!account.isActive) throw new ApiError(403, "Account is not active");
+            if (account.isActive !== "active") throw new ApiError(403, "Account is not active");
             if (account.balance < amountCents) throw new ApiError(400, "Insufficient funds");
 
 
@@ -510,7 +502,6 @@ export const withdraw = asyncHandler(async (req, res) => {
                 throw new ApiError(400, "Insufficient funds or account locked");
             }
 
-            await account.save({ session });
             const transaction = new Transaction({
                 senderAccount: account._id,
                 type: TRANSACTION_TYPES.WITHDRAW,
@@ -530,10 +521,10 @@ export const withdraw = asyncHandler(async (req, res) => {
             const ledger = new LedgerEntry({
                 transactionId: transaction._id,
                 accountId: account._id,
-                type: "WITHDRAW",
+                type: "DEBIT",
                 amount: fromCents(amountCents),
-                balanceBefore,
-                balanceAfter: account.balance,
+                balanceBeforeCents: balanceBefore,
+                balanceAfterCents: account.balance,
                 currency: account.currency,
                 description: description || "Withdrawal from account",
             });
@@ -552,19 +543,27 @@ export const withdraw = asyncHandler(async (req, res) => {
                 },
             };
 
-            await Idempotency.create({
+            await Idempotency.create([{
                 userId,
                 key: idempotencyKey,
-                purpose: "withdraw",
+                purpose: "withdrawal",
                 statusCode: 200,
-                responseBody,
-            }, { session });
+                responseBody: {
+                    ...responseBody,
+                    message: "Transaction already processed",
+                },
+            }], { session });
 
             return { transaction, responseBody };
         });
 
         await redis
-            .set(cacheKey, JSON.stringify({ statusCode: 200, body: responseBody }), "EX", Number(process.env.CACHE_TTL_SECONDS))
+            .set(cacheKey, JSON.stringify({
+                statusCode: 200, body: {
+                    ...responseBody,
+                    message: "Transaction already processed",
+                },
+            }), "EX", Number(process.env.CACHE_TTL_SECONDS))
             .catch((e) => console.error("[withdraw] Failed to set Redis cache:", e.message));
 
 
@@ -582,25 +581,25 @@ export const withdraw = asyncHandler(async (req, res) => {
 
 
 export const getTransactionHistory = asyncHandler(async (req, res) => {
-    const { accountId } = req.params;
+    const { accountNumber } = req.params;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
     const { type, startDate, endDate } = req.query;
 
 
-    const account = await Account.findById(accountId);
+    const account = await Account.findOne({ accountNumber: accountNumber });
     if (!account) throw new ApiError(404, "Account not found");
     if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to view transactions for this account");
 
-    const cacheKey = `txn:history:${accountId}:p${page}:l${limit}:t${type || ""}:s${startDate || ""}:e${endDate || ""}`;
+    const cacheKey = `txn:history:${account._id}:p${page}:l${limit}:t${type || ""}:s${startDate || ""}:e${endDate || ""}`;
     const cached = await checkRedisCache(cacheKey, "getTransactionHistory");
     if (cached) {
-        return res.set("X-Cache", "HIT").status(200).json(cached.body);
+        return new ApiResponse(200, "Transaction history", cached.body).send(res);
     }
 
 
     const filter = {
-        $or: [{ senderAccount: accountId }, { receiverAccount: accountId }]
+        $or: [{ senderAccount: account._id }, { receiverAccount: account._id }]
     };
     const ALLOWED_TYPES = new Set(Object.values(TRANSACTION_TYPES));
     if (type) {
@@ -633,12 +632,8 @@ export const getTransactionHistory = asyncHandler(async (req, res) => {
             .select("-metadata"),
         Transaction.countDocuments(filter)
     ]);
-    await redis
-        .set(cacheKey, JSON.stringify({ body: responseBody }), "EX", Number(process.env.CACHE_TTL_SECONDS))
-        .catch((e) => console.error("[getTransactionHistory] Redis SET failed:", e.message));
 
-
-    return new ApiResponse(200, "Transaction history", {
+    const responseBody = {
         transactions,
         pagination: {
             total,
@@ -646,7 +641,14 @@ export const getTransactionHistory = asyncHandler(async (req, res) => {
             totalPages: Math.ceil(total / limit),
             limit: Number(limit)
         }
-    }).send(res);
+    };
+
+    await redis
+        .set(cacheKey, JSON.stringify({ body: responseBody }), "EX", Number(process.env.CACHE_TTL_SECONDS))
+        .catch((e) => console.error("[getTransactionHistory] Redis SET failed:", e.message));
+
+
+    return new ApiResponse(200, "Transaction history", responseBody).send(res);
 });
 
 
@@ -658,7 +660,7 @@ export const getTransactionById = asyncHandler(async (req, res) => {
     const cacheKey = `txn:id:${transactionId}:u:${req.user.id}`;
     const cached = await checkRedisCache(cacheKey, "getTransactionById");
     if (cached) {
-        return res.set("X-Cache", "HIT").status(200).json(cached.body);
+        return new ApiResponse(200, "Transaction found", { transaction: cached.body }).send(res);
     }
 
     const transaction = await Transaction.findById(transactionId)
@@ -690,22 +692,22 @@ export const getTransactionById = asyncHandler(async (req, res) => {
 
 
 export const getLedgerHistory = asyncHandler(async (req, res) => {
-    const { accountId } = req.params;
+    const { accountNumber } = req.params;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
 
-    const account = await Account.findById(accountId);
+    const account = await Account.findOne({ accountNumber });
     if (!account) throw new ApiError(404, "Account not found");
     if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to view ledger for this account");
 
-    const cacheKey = `ledger:history:${accountId}:p${page}:l${limit}`;
+    const cacheKey = `ledger:history:${account._id}:p${page}:l${limit}`;
     const cached = await checkRedisCache(cacheKey, "getLedgerHistory");
 
     if (cached) {
         return res.set("X-Cache", "HIT").status(200).json(cached.body);
     }
 
-    const filter = { accountId };
+    const filter = { accountId: account._id };
 
     const [entries, total] = await Promise.all([
         LedgerEntry.find(filter)
@@ -731,33 +733,32 @@ export const getLedgerHistory = asyncHandler(async (req, res) => {
 });
 
 export const verifyBalance = asyncHandler(async (req, res) => {
-    const { accountId } = req.params;
-    const account = await Account.findById(accountId);
+    const { accountNumber } = req.params;
+    const account = await Account.findOne({ accountNumber });
     if (!account) throw new ApiError(404, "Account not found");
     if (account.userId.toString() !== req.user.id) throw new ApiError(403, "Unauthorized to verify balance for this account");
 
-    const TYPE_SIGN = {
-        CREDIT: +1,
-        DEPOSIT: +1,
-        DEBIT: -1,
-    };
 
-
-    const entries = await LedgerEntry.find({ accountId }).sort({ createdAt: 1 }).select("type amount balanceBefore balanceAfter")
+    const entries = await LedgerEntry.find({ accountId: account._id }).sort({ createdAt: 1 }).select("type amount")
         .lean();;
 
+    console.log(`[verifyBalance] Ledger entries for account ${accountNumber}:`, entries);
     let reconstructed = 0;
     for (const entry of entries) {
-        if (entry.type === "credit") reconstructed += entry.amount;
-        if (entry.type === "debit") reconstructed -= entry.amount;
-        reconstructed = parseFloat(reconstructed.toFixed(2));
+        const amount = Math.round(entry.amount);
+        if (entry.type === "CREDIT") reconstructed += entry.amount;
+        if (entry.type === "DEBIT") reconstructed -= entry.amount;
     }
 
+    const actualBalance = Math.round(account.balance);
     const isConsistent = reconstructed === account.balance;
 
     return new ApiResponse(200, "Balance verification", {
         currentBalance: account.balance,
         reconstructedBalance: reconstructed,
         isConsistent,
+        ...(isConsistent
+            ? {}
+            : { discrepancy: actualBalance - reconstructed }),
     }).send(res);
 });

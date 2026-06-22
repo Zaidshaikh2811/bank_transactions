@@ -19,7 +19,7 @@ const ledgerSchema = new mongoose.Schema({
         type: String,
         enum: [
             "CREDIT",
-            "DEBIT",],
+            "DEBIT"],
         required: [true, "Ledger entry type is required"],
         immutable: true,
     },

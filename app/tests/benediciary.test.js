@@ -40,7 +40,7 @@ const registerAndLogin = async () => {
 
 
 const createAccount = async (userId, overrides = {}) => {
-    return Account.create({
+    return Account.create([{
         userId,
         accountNumber: `ACC${Date.now()}${Math.floor(Math.random() * 9999)}`,
         accountType: "savings",
@@ -48,7 +48,7 @@ const createAccount = async (userId, overrides = {}) => {
         isActive: "active",
         balance: 10000,
         ...overrides,
-    });
+    }]);
 };
 
 

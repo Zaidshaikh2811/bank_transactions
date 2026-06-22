@@ -14,7 +14,7 @@ const idempotencySchema = new mongoose.Schema(
         },
         purpose: {
             type: String,
-            enum: ["add_beneficiary", "beneficiary_transfer", "deposit", "withdrawal"],
+            enum: ["add_beneficiary", "beneficiary_transfer", "deposit", "withdrawal", "transfer"],
             required: true,
         },
         statusCode: {

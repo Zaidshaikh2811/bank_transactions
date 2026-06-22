@@ -9,13 +9,14 @@
     "dev": "npx nodemon -L server.js",
     "start:worker": "node worker.js",
     "test": "vitest run",
-    "test:watch": "vitest watch",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
     "lint": "eslint src/**/*.js"
   },
   "vitest": {
     "testEnvironment": "node",
-    "testMatch": [
-      "**/tests/**/*.test.js"
+    "include": [
+      "tests/**/*.test.js"
     ]
   },
   "keywords": [],

@@ -9,13 +9,14 @@ const router = express.Router();
 
 
 
-router.post('/deposit/:accountId', authMiddleware, deposit);
-router.post("/withdraw/:accountId", authMiddleware, withdraw)
+
+router.post('/deposit/:accountNumber', authMiddleware, deposit);
+router.post("/withdraw/:accountNumber", authMiddleware, withdraw)
 router.post("/transfer", authMiddleware, transfer);
 
-router.get("/history/:accountId", authMiddleware, getTransactionHistory);
-router.get("/ledger/:accountId", authMiddleware, getLedgerHistory);
-router.get("/verify/:accountId", authMiddleware, verifyBalance);
+router.get("/history/:accountNumber", authMiddleware, getTransactionHistory);
+router.get("/ledger/:accountNumber", authMiddleware, getLedgerHistory);
+router.get("/verify/:accountNumber", authMiddleware, verifyBalance);
 router.get("/:transactionId", authMiddleware, getTransactionById);
 
 
