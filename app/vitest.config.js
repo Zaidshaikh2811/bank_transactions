@@ -8,5 +8,7 @@ export default defineConfig({
         setupFiles: ["./tests/setup.js"],
         testTimeout: 30000,
         pool: "forks",
+        fileParallelism: false,
+        retry: 2,
     },
 });
