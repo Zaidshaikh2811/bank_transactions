@@ -11,6 +11,7 @@ import Otp from "../models/otp.model.js";
 import mongoose from "mongoose";
 import { sendOtp } from "../utils/opt.utils.js";
 import Idoempotency from "../models/idempotency.model.js";
+import Transaction from "../models/transaction.model.js";
 
 export const addBeneficiary = asyncHandler(async (req, res) => {
     const { accountNumber, nickname } = req.body;
@@ -102,13 +103,14 @@ export const addBeneficiary = asyncHandler(async (req, res) => {
 
 export const confirmBeneficiaryOtp = asyncHandler(async (req, res) => {
     const { otp } = req.body;
+    console.log("Received OTP for confirmation:", otp);
 
     if (!otp) throw new ApiError(400, "OTP is required");
 
     const otpRecord = await Otp.findOne({
         userId: req.user.id,
         purpose: "add_beneficiary",
-    });
+    }).select("+hashedOtp");
 
     if (!otpRecord) {
         throw new ApiError(400, "No pending OTP found. Please add a beneficiary first.");
@@ -117,7 +119,7 @@ export const confirmBeneficiaryOtp = asyncHandler(async (req, res) => {
         await otpRecord.deleteOne();
         throw new ApiError(400, "OTP has expired. Please add the beneficiary again.");
     }
-    if (!otpRecord.verify(otp)) {
+    if (!(await otpRecord.verify(otp))) {
         otpRecord.attempts += 1;
         if (otpRecord.attempts >= 3) {
             await otpRecord.deleteOne();
@@ -207,6 +209,7 @@ export const removeBeneficiary = asyncHandler(async (req, res) => {
 
 export const transferToBeneficiary = asyncHandler(async (req, res) => {
     const { beneficiaryId, amount, note, senderAccountId } = req.body;
+    const idempotencyKey = req.header("X-Idempotency-Key");
 
     if (!beneficiaryId || amount === undefined || !senderAccountId) {
         throw new ApiError(400, "Beneficiary ID, amount, and sender account ID are required");
@@ -247,6 +250,10 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Sender account not found or inactive");
     }
 
+    if (senderAccount.balance < parsedAmount) {
+        throw new ApiError(400, "Insufficient balance in sender account");
+    }
+
 
     const beneficiary = await Beneficiary.findOne({
         _id: beneficiaryId,
@@ -254,21 +261,16 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
         isVerified: true,
     }).populate(
         "beneficiaryAccountId",
-        "_id accountNumber accountType currency isVerified balance userId"
+        "_id accountNumber accountType currency isActive balance userId"
     );
 
     if (!beneficiary) {
         throw new ApiError(404, "Beneficiary not found");
     }
 
+    console.log("Sender Account:", senderAccount);
+    console.log("Beneficiary Account:", beneficiary);
     const recipientAccount = beneficiary.beneficiaryAccountId;
-
-    if (!recipientAccount || recipientAccount.isVerified !== true) {
-        throw new ApiError(400, "Recipient account is not verified");
-    }
-    if (recipientAccount.userId?.toString() === req.user.id.toString()) {
-        throw new ApiError(400, "Cannot transfer to your own account");
-    }
 
     if (senderAccount.currency !== recipientAccount.currency) {
         throw new ApiError(
@@ -278,16 +280,28 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
         );
     }
 
+    console.log("Recipient Account:", recipientAccount);
+    if (!recipientAccount || recipientAccount.isActive !== "active") {
+        throw new ApiError(400, "Recipient account is not active");
+    }
+    if (recipientAccount.userId?.toString() === req.user.id.toString()) {
+        throw new ApiError(400, "Cannot transfer to your own account");
+    }
+
+
+
     if (senderAccount._id.equals(recipientAccount._id)) {
         throw new ApiError(400, "Cannot transfer to your own account");
     }
 
     if (senderAccount.balance < parsedAmount) {
-        throw new ApiError(400, "Insufficient balance");
+        throw new ApiError(400, "Insufficient balance in sender account");
     }
 
 
-    const { transaction, debitedSender } = await withTransaction(async (session) => {
+
+
+    const { completedTransaction, debitedSender } = await withTransaction(async (session) => {
         const debitedSender = await Account.findOneAndUpdate(
             {
                 _id: senderAccount._id,
@@ -327,9 +341,10 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
                     amount: parsedAmount,
                     currency: senderAccount.currency,
                     note: note?.trim().substring(0, 200) || "",
-                    status: "completed",
-                    type: "beneficiary_transfer",
+                    status: "PENDING",
+                    type: "TRANSFER",
                     balanceAfterDebit: debitedSender.balance,
+                    idempotencyKey: idempotencyKey,
                 },
             ],
             { session }
@@ -337,6 +352,8 @@ export const transferToBeneficiary = asyncHandler(async (req, res) => {
         return { completedTransaction, debitedSender };
 
     });
+
+    console.log("Transfer completed:", completedTransaction);
     return new ApiResponse(200, "Transfer successful", {
         transactionId: completedTransaction._id,
         amount: parsedAmount,
