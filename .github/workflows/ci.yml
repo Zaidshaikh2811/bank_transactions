@@ -29,14 +29,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - name: Install dependencies
         run: npm ci
+        working-directory: ./app
 
       - name: Run tests 
         continue-on-error: true 
+        working-directory: ./app
         env:
           NODE_ENV:          test
           MONGO_URI:    ${{ secrets.MONGO_URI }}
