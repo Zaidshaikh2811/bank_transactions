@@ -54,8 +54,8 @@ export const login = asyncHandler(async (req, res) => {
 
 export const refreshToken = asyncHandler(async (req, res) => {
 
-    const cookies = cookie.parse(req.headers.cookie || "");
-    const { accessToken: newAccessToken, refreshToken: newRefreshToken } = await authService.refreshToken(cookies.refreshToken);
+    const refreshToken = req.headers.cookie ? cookie.parse(req.headers.cookie).refreshToken : null;
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } = await authService.refreshToken(refreshToken);
 
     res.cookie("refreshToken", newRefreshToken, {
         httpOnly: true,
@@ -71,8 +71,10 @@ export const refreshToken = asyncHandler(async (req, res) => {
 })
 
 export const logout = asyncHandler(async (req, res) => {
-    const cookies = cookie.parse(req.headers.cookie || "");
-    const { refreshToken } = cookies;
+    const refreshToken = req.headers.cookie ? cookie.parse(req.headers.cookie).refreshToken : null;
+    if (!refreshToken) {
+        return new ApiResponse(400, "Refresh token not found").send(res);
+    }
     await RefreshToken.findOneAndUpdate(
         { token: refreshToken },
         { isRevoked: true }
@@ -129,8 +131,12 @@ export const deactivateUser = asyncHandler(async (req, res) => {
 
 
 export const activateUser = asyncHandler(async (req, res) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    const response = await authService.activateUser(token);
+    const accessToken = req.headers.authorization?.split(' ')[1];
+    if (!accessToken) {
+        return new ApiResponse(401, "Access token not found").send(res);
+    }
+    console.log("accessToken", accessToken);
+    const response = await authService.activateUser(accessToken);
     return new ApiResponse(200, response.message).send(res);
 });
 

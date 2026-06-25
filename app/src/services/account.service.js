@@ -2,7 +2,7 @@ import ApiError from "../utils/ApiError.js";
 import { emailQueue } from "../jobs/email.queue.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import { generateAccountNumber } from "../utils/account.utils.js";
-import { VALID_ACCOUNT_TYPES } from "../models/account.model.js";
+import { ACCOUNT_TYPES, ACCOUNT_STATUS, ACCOUNT_CURRENCIES } from "../constants/account.constants.js";
 import accountRepository from "../repositories/account.repository.js";
 import userRepository from "../repositories/user.repository.js";
 
@@ -25,9 +25,9 @@ class AccountService {
 
         if (!user.isActive) throw new ApiError(403, "Account is suspended");
 
-        const { accountType = "savings" } = req.body || {};
+        const { accountType = ACCOUNT_TYPES.SAVINGS } = req.body || {};
 
-        if (!VALID_ACCOUNT_TYPES.includes(accountType)) throw new ApiError(400, `Invalid account type. Must be one of: ${VALID_ACCOUNT_TYPES.join(", ")}`);
+        if (!ACCOUNT_TYPES.includes(accountType)) throw new ApiError(400, `Invalid account type. Must be one of: ${ACCOUNT_TYPES.join(", ")}`);
 
 
         const idempotencyKey =

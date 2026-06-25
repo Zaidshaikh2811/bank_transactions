@@ -16,7 +16,11 @@ class UserRepository {
     findByEmailWithPassword(email) {
         return User.findOne({
             email,
-        }).select("+password");
+        }).select("+password isActive _id name email phone");
+    }
+
+    create(data) {
+        return User.create(data);
     }
 
     save(user) {

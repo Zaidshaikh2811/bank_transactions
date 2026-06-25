@@ -10,6 +10,7 @@ import jwt from "jsonwebtoken";
 import { sendOtp } from "../utils/opt.utils.js";
 import OtpRepository from "../repositories/otp.repository.js";
 import { USER_ROLES, KYC_STATUS } from "../constants/user.constants.js";
+import { maskEmail } from "../utils/opt.utils.js";
 
 
 class AuthService {
@@ -36,7 +37,7 @@ class AuthService {
             throw new ApiError(400, "Phone number already in use");
 
         const user =
-            await userRepository.save({
+            await userRepository.create({
                 name,
                 email,
                 password,
@@ -71,7 +72,6 @@ class AuthService {
 
     async login(data) {
         const { email, password } = data;
-        console.log("Login data:", { email, password }); // Debugging line
 
         if (!email || !password) {
             throw new ApiError(400, "Email and password are required");
@@ -102,11 +102,9 @@ class AuthService {
 
         return {
             user: {
-                id: user._id,
                 name: user.name,
                 email: user.email,
                 phone: user.phone,
-                balance: user.balance,
             },
             refreshToken,
             accessToken,
@@ -133,21 +131,29 @@ class AuthService {
 
         let decoded;
 
-        try {
 
+        try {
             decoded = jwt.verify(
                 refreshToken,
                 process.env.REFRESH_TOKEN_SECRET
             );
-
         } catch (error) {
+            if (error instanceof jwt.TokenExpiredError) {
+                throw new ApiError(
+                    401,
+                    "Refresh token has expired. Please log in again"
+                );
+            }
 
-            throw new ApiError(
-                401,
-                "Invalid refresh token"
-            );
+            if (error instanceof jwt.JsonWebTokenError) {
+                throw new ApiError(
+                    401,
+                    "Invalid refresh token"
+                );
+            }
+
+            throw error;
         }
-
 
         if (storedToken.expiresAt < new Date()) {
             throw new ApiError(
@@ -206,13 +212,15 @@ class AuthService {
             meta: { email: user.email },
         });
 
-        user.isActive = true;
-        user.deactivatedAt = null;
-        user.deactivatedReason = null;
-        await user.save();
+
+
+        // user.isActive = true;
+        // user.deactivatedAt = null;
+        // user.deactivatedReason = null;
+        // await user.save();
         emailQueue.add("account-reactivated", {
             email: user.email
-        }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+        });
 
         return {
             message: "OTP sent to your email for account reactivation",
@@ -252,7 +260,32 @@ class AuthService {
             throw new ApiError(401, "Unauthorized");
         }
 
-        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        let decoded;
+
+        try {
+            decoded = jwt.verify(
+                token,
+                process.env.ACCESS_TOKEN_SECRET
+            );
+        } catch (error) {
+            if (error instanceof jwt.TokenExpiredError) {
+                throw new ApiError(
+                    401,
+                    "Verification link has expired. Please request a new one"
+                );
+            }
+
+            if (error instanceof jwt.JsonWebTokenError) {
+                throw new ApiError(
+                    401,
+                    "Invalid verification link"
+                );
+            }
+
+            throw error;
+        }
+
+
         const userId = decoded.id;
 
         const user = await userRepository.findById(userId).select("+password");
@@ -316,10 +349,10 @@ class AuthService {
         }));
     }
 
-    async verifyReactivationOtp(otp, email) {
+    async verifyReactivationOtp(email, otp) {
 
+        console.log("email", email, "otp", otp);
         const user = await userRepository.findByEmail(email);
-
         if (!user) {
             throw new ApiError(404, "User not found");
         }
@@ -328,13 +361,19 @@ class AuthService {
             throw new ApiError(400, "Account is already active");
         }
 
+        const maskedEmail = maskEmail(user.email);
+        console.log("maskedEmail", maskedEmail);
+
+
         const otpRecord = await OtpRepository.findReactivationOtp({
             userId: user._id,
             purpose: "account-reactivation",
-            maskedContact: otp.maskedContact,
+            maskedContact: maskedEmail,
         });
 
-        if (!otpRecord || otpRecord.otp !== otp) {
+        console.log("otpRecord", otpRecord);
+
+        if (!otpRecord || !(await otpRecord.verify(otp))) {
             throw new ApiError(400, "Invalid OTP");
         }
 

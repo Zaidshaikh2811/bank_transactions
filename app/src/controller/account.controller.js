@@ -6,7 +6,6 @@ import ApiError from "../utils/ApiError.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import User from "../models/user.model.js";
 import { generateAccountNumber } from "../utils/account.utils.js";
-import { VALID_ACCOUNT_TYPES } from "../models/account.model.js";
 import accountService from "../services/account.service.js";
 import { ACCOUNT_STATUS } from "../constants/account.constants.js";
 
@@ -32,7 +31,7 @@ export const freezeAccount = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Account not found");
     }
 
-    if (account.isActive ===  ) {
+    if (account.isActive === "closed") {
         throw new ApiError(400, "Closed accounts cannot be frozen");
     }
 

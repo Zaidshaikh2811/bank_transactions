@@ -3,16 +3,16 @@ import jwt from 'jsonwebtoken';
 import ApiError from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import User from '../models/user.model.js';
+import cookie from 'cookie';
 
 
 export async function authMiddleware(req, res, next) {
     try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) {
+        const refreshToken = req.headers.cookie ? cookie.parse(req.headers.cookie).refreshToken : null;
+        if (!refreshToken) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
-
-        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
         const user = await User.findById(decoded.id);
         if (!user) return res.status(401).json({ message: 'Unauthorized' });
         if (!user.isActive) return next(new ApiError(403, "Account is suspended"));

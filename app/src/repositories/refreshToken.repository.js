@@ -38,6 +38,13 @@ class RefreshTokenRepository {
             isRevoked: false,
         }).select("-__v -_id -userId");
     }
+
+    findAllActiveForUser(userId) {
+        return RefreshToken.find({
+            userId,
+            isRevoked: false,
+        });
+    }
 }
 
 export default new RefreshTokenRepository();

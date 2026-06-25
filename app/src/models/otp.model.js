@@ -63,7 +63,7 @@ otpSchema.statics.createOtp = async function ({ userId, purpose, meta = {}, mask
         maskedContact,
     });
 
-    return { doc, plaintext }; // caller dispatches plaintext via SMS/email
+    return { doc, plaintext, hashed }; // caller dispatches plaintext via SMS/email
 };
 
 
