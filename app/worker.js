@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { startEmailWorker } from "./src/queues/emailWorker.js";
+import { startEmailWorker } from "./src/jobs/email.worker.js";
 
 
 startEmailWorker();

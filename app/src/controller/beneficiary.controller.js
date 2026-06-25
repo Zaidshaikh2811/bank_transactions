@@ -6,7 +6,7 @@ import Beneficiary from "../models/beneficiary.model.js";
 import Account from "../models/account.model.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import { maskAccountNumber } from "../utils/account.utils.js";
-import { emailQueue } from "../queues/emailQueue.js";
+import { emailQueue } from "../jobs/email.queue.js";
 import Otp from "../models/otp.model.js";
 import mongoose from "mongoose";
 import { sendOtp } from "../utils/opt.utils.js";

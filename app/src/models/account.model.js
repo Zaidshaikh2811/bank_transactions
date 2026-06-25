@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
-
-export const VALID_ACCOUNT_TYPES = ["savings", "current", "fixed"];
+import {
+    ACCOUNT_TYPES,
+    ACCOUNT_STATUS,
+    ACCOUNT_CURRENCIES,
+} from "../constants/account.constants.js";
 
 const bankAccountSchema = new mongoose.Schema({
     userId: {
@@ -12,7 +15,7 @@ const bankAccountSchema = new mongoose.Schema({
     isActive: {
         type: String,
         enum: {
-            values: ["active", "suspended", "closed"],
+            values: Object.values(ACCOUNT_STATUS),
             message: "Status must be either active, suspended, or closed"
         },
         default: "active"
@@ -26,13 +29,17 @@ const bankAccountSchema = new mongoose.Schema({
 
     accountType: {
         type: String,
-        enum: { values: VALID_ACCOUNT_TYPES, message: "Account type must be either savings, current, or fixed" },
+        enum: { values: Object.values(ACCOUNT_TYPES), message: "Account type must be either savings, current, or fixed" },
         default: "savings",
     },
     currency: {
         type: String,
         required: [true, "Currency is required"],
         uppercase: true,
+        enum: {
+            values: Object.values(ACCOUNT_CURRENCIES),
+            message: "Currency must be a valid 3-letter ISO code"
+        },
         match: [/^[A-Z]{3}$/, "Currency must be a valid 3-letter ISO code"],
         index: true,
         default: "INR"

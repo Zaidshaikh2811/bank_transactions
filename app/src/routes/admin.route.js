@@ -1,6 +1,6 @@
 import express from 'express';
 import { adminMiddleware } from '../middleware/admin.middleware.js';
-import { emailQueue } from '../queues/emailQueue.js';
+import { emailQueue } from '../jobs/email.queue.js';
 
 
 

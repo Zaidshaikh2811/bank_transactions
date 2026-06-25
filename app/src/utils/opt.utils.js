@@ -1,7 +1,7 @@
 
 import Otp from "../models/otp.model.js";
 import User from "../models/user.model.js";
-import { emailQueue } from "../queues/emailQueue.js";
+import { emailQueue } from "../jobs/email.queue.js";
 
 
 export const sendOtp = async ({ userId, purpose, meta = {} }) => {

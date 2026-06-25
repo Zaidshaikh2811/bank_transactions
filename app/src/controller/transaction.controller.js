@@ -5,7 +5,7 @@ import ApiError from "../utils/ApiError.js";
 import { acquireRedisLock, checkRedisCache, fromCents, parseAndValidateIdempotency, releaseLock, toCents, validateAmount } from "../utils/transaction.utils.js";
 import { withTransaction } from "../utils/withTransaction.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import { emailQueue } from "../queues/emailQueue.js";
+import { emailQueue } from "../jobs/email.queue.js";
 import { TRANSACTION_TYPES } from "../models/transaction.model.js";
 import LedgerEntry from "../models/ledger.model.js";
 import User from "../models/user.model.js";

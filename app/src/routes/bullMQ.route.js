@@ -1,5 +1,5 @@
 
-import { emailQueue } from "../queues/emailQueue.js";
+import { emailQueue } from "../jobs/email.queue.js";
 import { adminMiddleware } from "../middleware/admin.middleware.js";
 import express from "express";
 

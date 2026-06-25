@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { USER_ROLES, KYC_STATUS } from "../constants/user.constants.js";
 
 
 const userSchema = new mongoose.Schema({
@@ -35,8 +36,8 @@ const userSchema = new mongoose.Schema({
     },
     kycStatus: {
         type: String,
-        enum: ["PENDING", "VERIFIED", "REJECTED"],
-        default: "PENDING",
+        enum: Object.values(KYC_STATUS),
+        default: KYC_STATUS.PENDING,
     },
     deactivatedAt: {
         type: Date,
@@ -46,8 +47,8 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ["USER", "ADMIN"],
-        default: "USER",
+        enum: Object.values(USER_ROLES),
+        default: USER_ROLES.USER,
     },
     password: {
         type: String,
@@ -55,7 +56,7 @@ const userSchema = new mongoose.Schema({
         minlength: [6, "Password must be at least 6 characters long"],
         trim: true,
         select: false
-    }
+    },
 }, {
     timestamps: true,
 });
