@@ -3,8 +3,12 @@ import User from "../models/user.model.js";
 
 
 class UserRepository {
-    findById(id) {
-        return User.findById(id);
+    findById(id, selectFields = null) {
+        let query = User.findById(id);
+        if (selectFields) {
+            query = query.select(selectFields);
+        }
+        return query;
     }
 
     findByEmail(email) {

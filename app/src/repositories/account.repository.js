@@ -8,6 +8,12 @@ class AccountRepository {
         });
     }
 
+    findByAccountNumber(accountNumber, session) {
+        return accountModel.findOne({
+            accountNumber,
+        }).session(session);
+    }
+
     countByUserId(userId, session) {
         return accountModel
             .countDocuments({ userId })
@@ -43,8 +49,12 @@ class AccountRepository {
         });
     }
 
-    save(account) {
-        return account.save();
+    save(account, session) {
+        return account.save({ session });
+    }
+
+    findOneAndUpdate(query, update, session) {
+        return accountModel.findOneAndUpdate(query, update, { new: true }).session(session);
     }
 }
 

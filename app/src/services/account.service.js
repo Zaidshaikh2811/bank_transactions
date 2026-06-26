@@ -26,8 +26,10 @@ class AccountService {
         if (!user.isActive) throw new ApiError(403, "Account is suspended");
 
         const { accountType = ACCOUNT_TYPES.SAVINGS } = req.body || {};
+        const validAccountTypes = Object.values(ACCOUNT_TYPES);
 
-        if (!ACCOUNT_TYPES.includes(accountType)) throw new ApiError(400, `Invalid account type. Must be one of: ${ACCOUNT_TYPES.join(", ")}`);
+        if (!validAccountTypes.includes(accountType))
+            throw new ApiError(400, `Invalid account type. Must be one of: ${validAccountTypes.join(", ")}`);
 
 
         const idempotencyKey =

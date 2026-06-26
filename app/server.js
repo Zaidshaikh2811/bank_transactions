@@ -1,33 +1,72 @@
-
-import cluster from "node:cluster";
-import { availableParallelism } from "node:os";
 import process from "node:process";
 import "dotenv/config";
 
-const NUM_WORKERS = Number(process.env.WEB_CONCURRENCY) || availableParallelism();
+const PORT = process.env.PORT || 3000;
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10_000;
 
-if (cluster.isPrimary) {
-    console.log(`Primary ${process.pid} started — forking ${NUM_WORKERS} workers`);
+const { default: app } = await import("./src/app.js");
+const { connectDB, disconnectDB } = await import("./src/config/db.js");
 
+await connectDB();
 
+const server = app.listen(PORT, () => {
+    console.log(
+        `Worker ${process.pid} listening on port ${PORT} in ${process.env.NODE_ENV} mode`
+    );
+});
 
-    for (let i = 0; i < NUM_WORKERS; i++) {
-        cluster.fork();
+let isShuttingDown = false;
+
+server.on("request", (req, res) => {
+    if (isShuttingDown) {
+        res.setHeader("Connection", "close");
+    }
+});
+
+async function shutdown(signal) {
+    if (isShuttingDown) return
+    isShuttingDown = true;
+
+    console.warn(`${signal} received. Starting graceful shutdown…`);
+
+    const closeServer = new Promise((resolve) => {
+        server.close(() => resolve());
+    });
+
+    const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Shutdown timed out")), SHUTDOWN_TIMEOUT_MS)
+    );
+
+    try {
+        await Promise.race([closeServer, timeout]);
+        console.log("HTTP server closed — no requests left in flight.");
+    } catch (err) {
+        console.error(
+            `Forcing shutdown after ${SHUTDOWN_TIMEOUT_MS}ms: ${err.message}`
+        );
     }
 
-    cluster.on("exit", (worker, code, signal) => {
-        console.warn(
-            `Worker ${worker.process.pid} exited (code=${code}, signal=${signal}). Respawning…`
-        );
-        cluster.fork();
-    });
-} else {
-    const { default: app } = await import("./src/app.js");
-    const { connectDB } = await import("./src/config/db.js");
-    await connectDB();
+    try {
+        if (typeof disconnectDB === "function") {
+            await disconnectDB();
+            console.log("Database connection closed.");
+        }
+    } catch (err) {
+        console.error("Error closing DB connection:", err);
+    }
 
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => {
-        console.log(`Worker ${process.pid} listening on port : ${PORT} In ${process.env.NODE_ENV} mode`);
-    });
+    process.exit(0);
 }
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+process.on("uncaughtException", (err) => {
+    console.error("Uncaught exception:", err);
+    shutdown("uncaughtException");
+});
+
+process.on("unhandledRejection", (reason) => {
+    console.error("Unhandled rejection:", reason);
+    shutdown("unhandledRejection");
+});

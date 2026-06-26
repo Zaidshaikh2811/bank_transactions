@@ -1,19 +1,6 @@
-export const TRANSACTION_TYPES = {
-    TRANSFER: "TRANSFER",
-    DEPOSIT: "DEPOSIT",
-    WITHDRAW: "WITHDRAW",
-    BILL_PAYMENT: "BILL_PAYMENT",
-    REFUND: "REFUND"
-};
-
-export const TRANSACTION_STATUSES = {
-    PENDING: "PENDING",
-    SUCCESS: "SUCCESS",
-    FAILED: "FAILED",
-    REVERSED: "REVERSED"
-};
 
 import mongoose from "mongoose";
+import { TRANSACTION_STATUSES, TRANSACTION_TYPES } from "../constants/transaction.constants.js";
 
 const transactionSchema = new mongoose.Schema(
     {
