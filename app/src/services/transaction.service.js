@@ -17,6 +17,7 @@ import {
     ACCOUNT_STATUS,
     ACCOUNT_CURRENCIES,
 } from "../constants/account.constants.js";
+import { EMAIL_TEMPLATES } from "../constants/email.constants.js";
 
 
 class TransactionService {
@@ -384,14 +385,14 @@ class TransactionService {
             try {
                 await
                     Promise.all([
-                        emailQueue.add("transaction-notification", {
+                        emailQueue.add(EMAIL_TEMPLATES.TRANSACTION_NOTIFICATION, {
                             email: transaction.senderUserEmail,
                             amount: fromCents(amountCents),
                             balance: transaction.senderBalance,
                             type: "sent",
                         }),
 
-                        emailQueue.add("transaction-notification", {
+                        emailQueue.add(EMAIL_TEMPLATES.TRANSACTION_NOTIFICATION, {
                             email: receiverUser.email,
                             amount: fromCents(amountCents),
                             balance: transaction.receiverBalance,

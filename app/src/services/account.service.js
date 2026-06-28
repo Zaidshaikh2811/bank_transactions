@@ -5,13 +5,14 @@ import { generateAccountNumber } from "../utils/account.utils.js";
 import { ACCOUNT_TYPES, ACCOUNT_STATUS, ACCOUNT_CURRENCIES } from "../constants/account.constants.js";
 import accountRepository from "../repositories/account.repository.js";
 import userRepository from "../repositories/user.repository.js";
-
-
+import { UUID_RE } from "../utils/idempotency.utils.js";
+import idempotencyRepository from "../repositories/idempotency.repository.js";
+import { IDEMPOTENCY_PURPOSES } from "../constants/idempotency.constant.js";
+import { EMAIL_TEMPLATES } from "../constants/email.constants.js";
 
 class AccountService {
     async createAccount(req) {
         const userId = req.user.id;
-
         const user = await userRepository.findAccountCreationUser(userId);
 
         if (!user)
@@ -41,20 +42,22 @@ class AccountService {
                 "Idempotency key is required"
             );
         }
+        if (!UUID_RE.test(idempotencyKey)) {
+            throw new ApiError(400, "X-Idempotency-Key must be a valid UUID v4");
+        }
+
 
         const duplicate =
-            await accountRepository.findByIdempotencyKey(
-                idempotencyKey
+            await idempotencyRepository.findByKey(
+                userId,
+                idempotencyKey,
+                IDEMPOTENCY_PURPOSES.CREATE_BANK_ACCOUNT
             );
 
         if (duplicate) {
-            throw new ApiError(
-                400,
-                "Account with this idempotency key already exists",
-                {
-                    account: duplicate,
-                }
-            );
+            return {
+                ...duplicate.responseBody
+            };
         }
 
         const account =
@@ -73,7 +76,7 @@ class AccountService {
                         );
                     }
 
-                    if (accountType === "savings") {
+                    if (accountType === ACCOUNT_TYPES.SAVINGS) {
                         const hasSavings =
                             await accountRepository.findSavingsByUserId(
                                 userId,
@@ -94,16 +97,41 @@ class AccountService {
                             accountNumber:
                                 generateAccountNumber(),
                             accountType,
-                            idempotencyKey,
                         },
                             session
                         );
+
+
+                    await idempotencyRepository.create(
+                        [{
+                            userId,
+                            key: idempotencyKey,
+                            purpose: IDEMPOTENCY_PURPOSES.CREATE_BANK_ACCOUNT,
+                            accountId: account._id,
+                            responseBody: {
+                                account: {
+                                    id: account._id,
+                                    accountType:
+                                        account.accountType,
+                                    accountNumber:
+                                        account.accountNumber,
+                                    balance: account.balance,
+                                    createdAt:
+                                        account.createdAt,
+                                },
+                            },
+                            statusCode: 201,
+
+                        }],
+                        session
+                    );
+
 
                     return account;
                 }
             );
 
-        await emailQueue.add("welcome", { email: user.email, });
+        await emailQueue.add(EMAIL_TEMPLATES.CREATE_BANK_ACCOUNT, { email: user.email, });
 
         return {
             account: {
@@ -130,12 +158,12 @@ class AccountService {
 
         if (!account) throw new ApiError(404, "Account not found");
 
-        if (account.isActive === "closed") throw new ApiError(400, "Closed accounts cannot be frozen");
+        if (account.isActive === ACCOUNT_STATUS.CLOSED) throw new ApiError(400, "Closed accounts cannot be frozen");
 
-        if (account.isActive === "suspended")
+        if (account.isActive === ACCOUNT_STATUS.SUSPENDED)
             throw new ApiError(400, "Account is already frozen");
 
-        account.isActive = "suspended";
+        account.isActive = ACCOUNT_STATUS.SUSPENDED;
 
         await accountRepository.save(account);
     }
@@ -145,12 +173,12 @@ class AccountService {
 
         if (!account) throw new ApiError(404, "Account not found");
 
-        if (account.isActive === "closed") throw new ApiError(400, "Closed accounts cannot be reactivated");
+        if (account.isActive === ACCOUNT_STATUS.CLOSED) throw new ApiError(400, "Closed accounts cannot be reactivated");
 
-        if (account.isActive !== "suspended")
+        if (account.isActive !== ACCOUNT_STATUS.SUSPENDED)
             throw new ApiError(400, "Account is not frozen");
 
-        account.isActive = "active";
+        account.isActive = ACCOUNT_STATUS.ACTIVE;
 
         await accountRepository.save(account);
     }

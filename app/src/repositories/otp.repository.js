@@ -22,6 +22,14 @@ class OtpRepository {
         return otpRecord.save();
     }
 
+    deleteByPurpose(userId, purpose) {
+        return Otp.deleteMany({
+            userId,
+            purpose,
+        });
+    }
+
+
 }
 
 

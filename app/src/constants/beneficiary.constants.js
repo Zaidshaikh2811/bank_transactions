@@ -1,0 +1,4 @@
+export const BENEFICIARY = {
+    MAX_NICKNAME_LENGTH: 50,
+    MIN_NICKNAME_LENGTH: 2,
+};

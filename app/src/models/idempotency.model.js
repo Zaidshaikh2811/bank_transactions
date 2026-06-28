@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-
+import { IDEMPOTENCY_PURPOSES } from "../constants/idempotency.constant.js";
 const idempotencySchema = new mongoose.Schema(
     {
         userId: {
@@ -14,7 +14,7 @@ const idempotencySchema = new mongoose.Schema(
         },
         purpose: {
             type: String,
-            enum: ["add_beneficiary", "beneficiary_transfer", "deposit", "withdrawal", "transfer"],
+            enum: Object.values(IDEMPOTENCY_PURPOSES),
             required: true,
         },
         statusCode: {

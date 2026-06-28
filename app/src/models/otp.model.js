@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { OTP_PURPOSES } from "../constants/otp.constants.js";
 
 const otpSchema = new mongoose.Schema({
     userId: {
@@ -12,7 +13,7 @@ const otpSchema = new mongoose.Schema({
 
     purpose: {
         type: String,
-        enum: ["add_beneficiary", "login", "reset_password", "high_value_transfer", "account-reactivation"],
+        enum: Object.values(OTP_PURPOSES),
         required: true,
     },
 

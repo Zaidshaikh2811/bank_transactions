@@ -8,3 +8,9 @@ export const KYC_STATUS = {
     VERIFIED: "VERIFIED",
     REJECTED: "REJECTED",
 };
+
+export const USER_STATUS = {
+    ACTIVE: "ACTIVE",
+    INACTIVE: "INACTIVE",
+    DEACTIVATED: "DEACTIVATED",
+};

@@ -45,13 +45,13 @@ export const sendWelcomeEmail = async (email) => {
         to: email,
         subject: "Welcome to Banking System",
 
-        text: "Your account was created successfully",
+        text: "You Have Succesfully registered to our banking system. We are glad to have you on board.",
 
         html: `
         <h1>Welcome</h1>
 
         <p>
-            Your account was created successfully.
+            You Have Succesfully registered to our banking system. We are glad to have you on board.
         </p>
     `
     });
@@ -67,11 +67,11 @@ export const newAccountEmail = async (email) => {
     return await sendEmail({
         to: email,
         subject: "New Account Created",
-        text: "A new account was created for you",
+        text: "You Have Succesfully created a new account with our banking system.",
         html: `
         <h1>New Account Created</h1>
         <p>
-            A new account was created for you.
+            You Have Succesfully created a new account with our banking system.
         </p>
     `
     });

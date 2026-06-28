@@ -3,7 +3,6 @@ import {
     newAccountEmail,
     sendDeactivationEmail,
     sendReactivationEmail,
-    sendActivationEmail,
     sendAccountActivatedEmail,
     sendTransactionNotificationEmail,
     sendDepositEmail,
@@ -12,19 +11,19 @@ import {
 } from "../utils/sendEmail.js";
 
 import { Worker } from "bullmq";
+import { EMAIL_TEMPLATES } from "../constants/email.constants.js";
 
 
 const JOB_HANDLERS = {
-    "welcome": (d) => sendWelcomeEmail(d.email),
-    "account-created": (d) => newAccountEmail(d.email, d.accountType),
-    "account-deactivated": (d) => sendDeactivationEmail(d.email, d.reason),
-    "account-reactivated": (d) => sendReactivationEmail(d.email),
-    "activation": (d) => sendActivationEmail(d.email, d.verificationToken),
-    "account-activated": (d) => sendAccountActivatedEmail(d.email),
-    "transaction-notification": (d) => sendTransactionNotificationEmail(d.email, d.transactionDetails),
-    "deposit": (d) => sendDepositEmail(d.email, d.amount, d.balance),
-    "withdraw": (d) => sendWithdrawEmail(d.email, d.amount, d.balance),
-    "otp-confirmation": (d) => sendOtpEmail(d.email, d.otp, d.expiresInMinutes),
+    [EMAIL_TEMPLATES.WELCOME]: (d) => sendWelcomeEmail(d.email),
+    [EMAIL_TEMPLATES.CREATE_BANK_ACCOUNT]: (d) => newAccountEmail(d.email, d.accountType),
+    [EMAIL_TEMPLATES.DEACTIVATE_ACCOUNT]: (d) => sendDeactivationEmail(d.email, d.reason),
+    [EMAIL_TEMPLATES.REACTIVATE_ACCOUNT]: (d) => sendReactivationEmail(d.email),
+    [EMAIL_TEMPLATES.ACCOUNT_ACTIVATED]: (d) => sendAccountActivatedEmail(d.email),
+    [EMAIL_TEMPLATES.TRANSACTION_NOTIFICATION]: (d) => sendTransactionNotificationEmail(d.email, d.transactionDetails),
+    [EMAIL_TEMPLATES.DEPOSIT]: (d) => sendDepositEmail(d.email, d.amount, d.balance),
+    [EMAIL_TEMPLATES.WITHDRAW]: (d) => sendWithdrawEmail(d.email, d.amount, d.balance),
+    [EMAIL_TEMPLATES.OTP_CONFIRMATION]: (d) => sendOtpEmail(d.email, d.otp, d.expiresInMinutes),
 };
 
 // const worker = new Worker("emails", async (job) => {
@@ -69,7 +68,8 @@ export function startEmailWorker() {
     const worker = new Worker(
         "emails",
         async (job) => {
-            const handler = JOB_HANDLERS[job.name];
+            const handler = await JOB_HANDLERS[job.name];
+            console.log("Handler:", handler);
             if (!handler) {
                 console.warn(`[EmailWorker] Unknown job type: "${job.name}" — skipping`);
                 return;

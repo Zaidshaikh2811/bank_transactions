@@ -8,7 +8,7 @@ class IdempotencyRepository {
             userId,
             key,
             purpose,
-        });
+        }).select("responseBody");
     }
     create(data, session) {
         return Idempotency.create(

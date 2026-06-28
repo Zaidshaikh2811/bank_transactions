@@ -11,7 +11,7 @@ import { sendOtp } from "../utils/opt.utils.js";
 import OtpRepository from "../repositories/otp.repository.js";
 import { USER_ROLES, KYC_STATUS } from "../constants/user.constants.js";
 import { maskEmail } from "../utils/opt.utils.js";
-
+import { EMAIL_TEMPLATES } from "../constants/email.constants.js";
 
 class AuthService {
     async register(data) {
@@ -45,7 +45,7 @@ class AuthService {
             });
 
         emailQueue.add(
-            "welcome",
+            EMAIL_TEMPLATES.WELCOME,
             {
                 email: user.email,
             },
@@ -218,7 +218,7 @@ class AuthService {
         // user.deactivatedAt = null;
         // user.deactivatedReason = null;
         // await user.save();
-        emailQueue.add("account-reactivated", {
+        emailQueue.add(EMAIL_TEMPLATES.ACCOUNT_REACTIVATED, {
             email: user.email
         });
 
@@ -245,9 +245,9 @@ class AuthService {
         user.deactivatedAt = new Date();
         user.deactivatedReason = reason.trim() || "No reason provided";
         await user.save();
-        emailQueue.add("account-deactivated", {
+        emailQueue.add(EMAIL_TEMPLATES.ACCOUNT_DEACTIVATED, {
             email: user.email, reason: reason.trim() || "No reason provided"
-        }, { attempts: 3, backoff: { type: "exponential", delay: 2000 } });
+        });
 
         return {
             message: "User deactivated successfully",
@@ -300,7 +300,7 @@ class AuthService {
         user.isVerified = true;
         await user.save();
 
-        emailQueue.add("account-activated", {
+        emailQueue.add(EMAIL_TEMPLATES.ACCOUNT_ACTIVATED, {
             email: user.email
         });
 
@@ -320,7 +320,7 @@ class AuthService {
         await user.save();
 
 
-        emailQueue.add("account-deactivated", {
+        emailQueue.add(EMAIL_TEMPLATES.ACCOUNT_DEACTIVATED, {
             email: user.email, reason: reason || "Self deactivated"
         });
 
@@ -386,7 +386,7 @@ class AuthService {
         user.deactivationReason = null;
         await user.save();
 
-        emailQueue.add("account-reactivated", {
+        emailQueue.add(EMAIL_TEMPLATES.ACCOUNT_REACTIVATED, {
             email: user.email,
         });
 

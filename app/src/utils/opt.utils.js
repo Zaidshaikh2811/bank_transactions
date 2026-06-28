@@ -2,7 +2,7 @@
 import Otp from "../models/otp.model.js";
 import User from "../models/user.model.js";
 import { emailQueue } from "../jobs/email.queue.js";
-
+import { EMAIL_TEMPLATES } from "../constants/email.constants.js";
 
 export const maskEmail = (email = "") => {
     const [local, domain] = email.split("@");
@@ -13,6 +13,7 @@ export const maskEmail = (email = "") => {
 export const sendOtp = async ({ userId, purpose, meta = {} }) => {
     const user = await User.findById(userId).select("email phone").lean();
     if (!user) throw new Error("User not found when sending OTP");
+    console.log("Sending OTP to user:", user);
 
 
     const maskedContact = user.email ? maskEmail(user.email) : "****";
@@ -24,7 +25,7 @@ export const sendOtp = async ({ userId, purpose, meta = {} }) => {
         maskedContact,
     });
 
-    await emailQueue.add("otp-confirmation", {
+    await emailQueue.add(EMAIL_TEMPLATES.OTP_CONFIRMATION, {
         email: user.email,
         otp: plaintext,
         expiresInMinutes: Number(process.env.OTP_TTL_MINUTES) || 10,

@@ -18,7 +18,7 @@ const bankAccountSchema = new mongoose.Schema({
             values: Object.values(ACCOUNT_STATUS),
             message: "Status must be either active, suspended, or closed"
         },
-        default: "active"
+        default: ACCOUNT_STATUS.ACTIVE,
     },
     accountNumber: {
         type: String,
@@ -30,7 +30,7 @@ const bankAccountSchema = new mongoose.Schema({
     accountType: {
         type: String,
         enum: { values: Object.values(ACCOUNT_TYPES), message: "Account type must be either savings, current, or fixed" },
-        default: "savings",
+        default: ACCOUNT_TYPES.SAVINGS,
     },
     currency: {
         type: String,
@@ -42,7 +42,7 @@ const bankAccountSchema = new mongoose.Schema({
         },
         match: [/^[A-Z]{3}$/, "Currency must be a valid 3-letter ISO code"],
         index: true,
-        default: "INR"
+        default: ACCOUNT_CURRENCIES.INR
     },
     dailyTransferLimit: {
         type: Number,
@@ -52,10 +52,6 @@ const bankAccountSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: 0,
-    },
-    idempotencyKey: {
-        type: String,
-        unique: true,
     }
 }, {
     timestamps: true,

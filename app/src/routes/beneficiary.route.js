@@ -7,10 +7,11 @@ import {
     transferToBeneficiary,
     confirmBeneficiaryOtp
 } from "../controller/beneficiary.controller.js";
-
+import { validateBeneficiaryInput } from "../validators/beneficiary.validator.js";
+import { validate } from '../middleware/validate.middleware.js';
 const router = express.Router();
 
-router.post("/", authMiddleware, addBeneficiary);
+router.post("/", authMiddleware, validateBeneficiaryInput, validate, addBeneficiary);
 
 router.get("/", authMiddleware, getBeneficiaries);
 

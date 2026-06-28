@@ -135,7 +135,6 @@ export const activateUser = asyncHandler(async (req, res) => {
     if (!accessToken) {
         return new ApiResponse(401, "Access token not found").send(res);
     }
-    console.log("accessToken", accessToken);
     const response = await authService.activateUser(accessToken);
     return new ApiResponse(200, response.message).send(res);
 });

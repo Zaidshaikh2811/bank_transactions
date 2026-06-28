@@ -56,6 +56,10 @@ class AccountRepository {
     findOneAndUpdate(query, update, session) {
         return accountModel.findOneAndUpdate(query, update, { new: true }).session(session);
     }
+
+    findOne(query) {
+        return accountModel.findOne(query);
+    }
 }
 
 export default new AccountRepository();
